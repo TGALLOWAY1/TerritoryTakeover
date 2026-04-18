@@ -39,6 +39,10 @@ ignore_missing_imports = true
 module = "gymnasium.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "benchmarks.*"
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

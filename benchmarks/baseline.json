@@ -1,0 +1,61 @@
+{
+  "generated": "2026-04-18T02:06:16Z",
+  "python": "3.11.15",
+  "numpy": "2.4.4",
+  "platform": "linux",
+  "quick_mode": false,
+  "results": {
+    "bench_state_copy": {
+      "min_us": 4.693,
+      "median_us": 4.928,
+      "mean_us": 5.1107578,
+      "iters": 10000,
+      "target_us": 50.0,
+      "pass": true
+    },
+    "bench_legal_actions": {
+      "min_us": 0.407,
+      "median_us": 0.458,
+      "mean_us": 0.48742566,
+      "iters": 200000,
+      "target_us": 2.0,
+      "pass": true
+    },
+    "bench_step_no_enclosure": {
+      "min_us": 3.289,
+      "median_us": 6.795,
+      "mean_us": 398.3403429914189,
+      "iters": 47663,
+      "target_us": 20.0,
+      "pass": true
+    },
+    "bench_step_with_enclosure": {
+      "min_us": 81.058,
+      "median_us": 87.9975,
+      "mean_us": 91.8269272,
+      "iters": 5000,
+      "target_us": 250.0,
+      "pass": true,
+      "enclosure_hit_rate": 1.0
+    },
+    "bench_full_game_random": {
+      "min_us": 21479.776,
+      "median_us": 116705.725,
+      "mean_us": 124530.334075,
+      "iters": 200,
+      "target_us": 50000.0,
+      "pass": true
+    },
+    "bench_rollout_throughput": {
+      "min_us": 2584.377,
+      "median_us": 39507.848,
+      "mean_us": 46599.844072,
+      "iters": 500,
+      "target_us": null,
+      "pass": true,
+      "games_per_sec": 21.444353299900378,
+      "target_games_per_sec": 1000.0,
+      "games_per_sec_pass": false
+    }
+  }
+}
