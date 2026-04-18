@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from .agent import Agent
 from .harness import play_game, tournament
+from .maxn import MaxNAgent, ParanoidAgent, maxn_search, paranoid_search
 from .random_agent import HeuristicGreedyAgent, UniformRandomAgent
 
 __all__ = [
     "Agent",
     "HeuristicGreedyAgent",
+    "MaxNAgent",
+    "ParanoidAgent",
     "UniformRandomAgent",
+    "maxn_search",
+    "paranoid_search",
     "play_game",
     "tournament",
 ]
