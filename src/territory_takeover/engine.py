@@ -6,9 +6,11 @@ move/turn mechanics will follow.
 
 from __future__ import annotations
 
+from collections import deque
+
 import numpy as np
 
-from .constants import EMPTY, PATH_CODES
+from .constants import CLAIMED_CODES, DIRECTIONS, EMPTY, PATH_CODES
 from .state import GameState, PlayerState
 
 _SPAWN_INSET: int = 4
@@ -138,3 +140,83 @@ def reset(state: GameState) -> None:
     state.turn_number = 0
     state.winner = None
     state.done = False
+
+
+def detect_and_apply_enclosure(
+    state: GameState,
+    player_id: int,
+    placed_cell: tuple[int, int],
+) -> int:
+    """Claim any region enclosed by `player_id`'s path after `placed_cell` was appended.
+
+    Preconditions (caller contract):
+      - `placed_cell` has been appended to `state.players[player_id].path` and
+        `.path_set`, and is the current `.head`.
+      - `state.grid[placed_cell] == PATH_CODES[player_id]`.
+
+    Attribution rule: enclosed empty cells are claimed by `player_id` (the player
+    whose placement triggered detection), even if opponent path tiles form part of
+    the pocket's boundary. A majority-boundary variant is a possible future
+    extension; not implemented here.
+
+    Returns the number of newly-claimed cells (0 if no enclosure formed).
+    """
+    player = state.players[player_id]
+    path = player.path
+    path_set = player.path_set
+    grid = state.grid
+
+    # Trigger check: a loop can only have just closed if `placed_cell` is
+    # orthogonally adjacent to a same-player path tile OTHER than its predecessor
+    # (the predecessor is always adjacent and always in path_set).
+    predecessor = path[-2] if len(path) >= 2 else None
+    r, c = placed_cell
+    triggered = False
+    for dr, dc in DIRECTIONS:
+        nbr = (r + dr, c + dc)
+        if nbr == predecessor:
+            continue
+        if nbr in path_set:
+            triggered = True
+            break
+    if not triggered:
+        return 0
+
+    h, w = grid.shape
+    reachable = np.zeros((h, w), dtype=np.bool_)
+    q: deque[tuple[int, int]] = deque()
+
+    for cc in range(w):
+        if grid[0, cc] == EMPTY:
+            reachable[0, cc] = True
+            q.append((0, cc))
+        if h > 1 and grid[h - 1, cc] == EMPTY:
+            reachable[h - 1, cc] = True
+            q.append((h - 1, cc))
+    for rr in range(1, h - 1):
+        if grid[rr, 0] == EMPTY:
+            reachable[rr, 0] = True
+            q.append((rr, 0))
+        if w > 1 and grid[rr, w - 1] == EMPTY:
+            reachable[rr, w - 1] = True
+            q.append((rr, w - 1))
+
+    while q:
+        rr, cc = q.popleft()
+        for dr, dc in DIRECTIONS:
+            nr, nc = rr + dr, cc + dc
+            if (
+                0 <= nr < h
+                and 0 <= nc < w
+                and not reachable[nr, nc]
+                and grid[nr, nc] == EMPTY
+            ):
+                reachable[nr, nc] = True
+                q.append((nr, nc))
+
+    enclosed_mask = (grid == EMPTY) & ~reachable
+    count = int(enclosed_mask.sum())
+    if count:
+        grid[enclosed_mask] = CLAIMED_CODES[player_id]
+        player.claimed_count += count
+    return count
