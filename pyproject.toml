@@ -10,7 +10,8 @@ requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+gym = ["gymnasium>=0.29"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "gymnasium>=0.29"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -32,6 +33,10 @@ files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 module = "numpy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "gymnasium.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
