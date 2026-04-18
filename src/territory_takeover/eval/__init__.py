@@ -1,7 +1,9 @@
 """Position evaluation utilities: Voronoi partition and per-player features."""
 
 from .features import (
+    choke_pressure,
     claimed_count,
+    enclosure_potential,
     head_opponent_distance,
     mobility,
     path_length,
@@ -11,7 +13,9 @@ from .features import (
 from .voronoi import reachable_area, voronoi_partition
 
 __all__ = [
+    "choke_pressure",
     "claimed_count",
+    "enclosure_potential",
     "head_opponent_distance",
     "mobility",
     "path_length",
