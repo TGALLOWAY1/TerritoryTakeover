@@ -62,7 +62,8 @@ class GameState:
         """Construct a blank board with `num_players` stateless players.
 
         Player heads are placed at (-1, -1) as a sentinel; engine setup
-        (not yet implemented) is responsible for seeding real starting positions.
+        (see :func:`territory_takeover.engine.new_game`) is responsible for
+        seeding real starting positions.
         """
         grid = np.zeros((height, width), dtype=np.int8)
         players = [
