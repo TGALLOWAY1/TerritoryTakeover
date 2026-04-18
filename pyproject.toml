@@ -11,7 +11,15 @@ dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
 gym = ["gymnasium>=0.29"]
-dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "gymnasium>=0.29"]
+viz = ["matplotlib>=3.7", "pillow>=10"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "gymnasium>=0.29",
+    "matplotlib>=3.7",
+    "pillow>=10",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -37,6 +45,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "gymnasium.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["matplotlib.*", "PIL.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
