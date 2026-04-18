@@ -17,6 +17,14 @@ from .constants import (
     PLAYER_4_CLAIMED,
     PLAYER_4_PATH,
 )
+from .engine import (
+    IllegalMoveError,
+    StepResult,
+    compute_terminal_reward,
+    new_game,
+    reset,
+    step,
+)
 from .state import GameState, PlayerState
 
 __all__ = [
@@ -36,5 +44,11 @@ __all__ = [
     "PLAYER_4_CLAIMED",
     "PLAYER_4_PATH",
     "GameState",
+    "IllegalMoveError",
     "PlayerState",
+    "StepResult",
+    "compute_terminal_reward",
+    "new_game",
+    "reset",
+    "step",
 ]
