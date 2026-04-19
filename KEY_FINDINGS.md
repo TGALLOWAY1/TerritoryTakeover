@@ -130,15 +130,36 @@ logged; capturing that histogram is a Phase 3b instrumentation upgrade.
 ### 10×10 / 4p diagnostic
 
 Ran 100 000 episodes on the 10×10 4-player config, seed 0, no UCT eval
-(expensive on 4p). This is a diagnostic, not a gated target.
+(expensive on 4p). This is a diagnostic, not a gated target. Wall-clock:
+7 min 37 s. Final Q-table: 14 502 states.
 
-- See `docs/phase3a/10x10_4p_seed0_summary.yaml` and
-  `docs/phase3a/10x10_4p_seed0_eval_curves.csv` for the full trajectory.
-- Final win-rate vs 3 random opponents (uniform random baseline = 0.25):
-  see summary file (populated after run completes).
-- Q-table growth is much steeper than 8×8/2p — already > 11 000 keys by
-  episode 10 000, confirming the state-explosion risk called out in the
-  plan.
+Final eval (seed-42 evaluator, 500 games each, 1st-place = "win"; uniform
+baseline = 0.25):
+
+| opponent (3 seats) | games | win | loss | tie | win_rate | 95% CI         |
+|--------------------|-------|-----|------|-----|----------|----------------|
+| random             | 500   | 210 | 221  | 69  | **0.420**| [0.378, 0.464] |
+| greedy             | 500   | 153 | 292  | 55  | **0.306**| [0.267, 0.348] |
+
+Both are well above the 0.25 uniform baseline — the agent does learn
+*something* on 10×10/4p, modestly. Curves (`docs/phase3a/10x10_4p_seed0_*.png`):
+
+![10×10 vs Random](docs/phase3a/10x10_4p_seed0_vs_random.png)
+![10×10 vs Greedy](docs/phase3a/10x10_4p_seed0_vs_greedy.png)
+
+- **State explosion is real.** 14 502 unique keys after only 100 000
+  episodes, versus 7 909 after 500 000 episodes on 8×8/2p. The 10×10/4p
+  run fills new table slots ~9× faster per episode than 8×8/2p (0.145
+  keys/ep vs 0.016 keys/ep). Scaling tabular to 12×12 or larger is
+  clearly not viable with this encoder.
+- **Counter-intuitive result: 10×10/4p agent outperforms 8×8/2p agent.**
+  Despite 5× fewer episodes, the 10×10 agent beats both Random (42.0%
+  vs. uniform 25%) and Greedy (30.6% vs. uniform 25%) more decisively
+  than the 8×8/2p agent beats anything. Two plausible reasons: (a) 4p
+  averages out the self-play-vs-eval distribution mismatch because each
+  training game already has three "other" seats, (b) 10×10 corner spawns
+  leave ~100 cells of maneuvering room so early-game head-on collisions
+  (the likely failure mode on 8×8) are rare.
 
 ### Behavioral anomalies observed
 
