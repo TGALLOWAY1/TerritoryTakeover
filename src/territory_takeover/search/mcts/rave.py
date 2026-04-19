@@ -75,7 +75,10 @@ from territory_takeover.engine import step
 from .node import MCTSNode
 from .rollout import _terminal_value
 from .uct import (
+    PWContext,
     RootSnapshot,
+    _count_pw_deferred,
+    _pw_reveal,
     _robust_child,
     populate_untried,
     reconstruct_actions,
@@ -158,11 +161,12 @@ def _rave_child_score(
 
 
 def _select_rave(
-    node: RaveNode, c: float, k: float
+    node: RaveNode, c: float, k: float, *, pw_ctx: PWContext | None = None
 ) -> tuple[RaveNode, int]:
     """Descend by β-weighted RAVE score until terminal / expandable / dead end."""
     depth = 0
     while True:
+        _pw_reveal(node, pw_ctx)
         if node.is_terminal():
             return node, depth
         if node.untried_actions:
@@ -186,7 +190,12 @@ def _select_rave(
         depth += 1
 
 
-def _expand_rave(node: RaveNode, rng: np.random.Generator) -> RaveNode:
+def _expand_rave(
+    node: RaveNode,
+    rng: np.random.Generator,
+    *,
+    pw_ctx: PWContext | None = None,
+) -> RaveNode:
     """Attach one RaveNode child by popping a random untried action."""
     if not node.untried_actions:
         return node
@@ -196,9 +205,7 @@ def _expand_rave(node: RaveNode, rng: np.random.Generator) -> RaveNode:
     step(child_state, action, strict=True)
     child = RaveNode(child_state, parent=node, incoming_action=action)
     if not child.terminal:
-        child.untried_actions = list(
-            legal_actions(child_state, child_state.current_player)
-        )
+        populate_untried(child, pw_ctx=pw_ctx)
     node.children[action] = child
     return child
 
@@ -297,14 +304,16 @@ def _run_iterations_rave(
     c: float,
     k: float,
     rng: np.random.Generator,
+    *,
+    pw_ctx: PWContext | None = None,
 ) -> int:
     """Run the RAVE loop and return the maximum selection depth reached."""
     max_depth = 0
     for _ in range(iterations):
-        leaf, depth = _select_rave(root, c, k)
+        leaf, depth = _select_rave(root, c, k, pw_ctx=pw_ctx)
         if depth > max_depth:
             max_depth = depth
-        leaf = _expand_rave(leaf, rng)
+        leaf = _expand_rave(leaf, rng, pw_ctx=pw_ctx)
         value, history = _rollout_rave(leaf, rng)
         _backpropagate_rave(leaf, value, history)
     return max_depth
@@ -330,6 +339,10 @@ def rave_search(
     c: float = 1.4,
     k: float = 1000.0,
     rng: np.random.Generator | None = None,
+    *,
+    progressive_widening: bool = False,
+    pw_alpha: float = 0.5,
+    pw_min_children: int = 1,
 ) -> int:
     """Run RAVE for ``iterations`` simulations from ``root_state``; return robust child.
 
@@ -337,6 +350,10 @@ def rave_search(
     longer as visits grow. The default 1000 is Gelly & Silver's standard
     recommendation; games with highly context-sensitive action values may
     benefit from a smaller value.
+
+    ``progressive_widening`` enables PW at opponent nodes with the schedule
+    ``k_pw = max(pw_min_children, ceil(parent.visits ** pw_alpha))``; it is
+    orthogonal to AMAF updates (which still run over the full trajectory).
     """
     if root_state.current_player != root_player:
         raise ValueError(
@@ -347,11 +364,21 @@ def rave_search(
         raise ValueError(f"iterations must be >= 0; got {iterations}")
     if k <= 0:
         raise ValueError(f"k must be > 0; got {k}")
+    if progressive_widening:
+        if pw_alpha <= 0:
+            raise ValueError(f"pw_alpha must be > 0; got {pw_alpha}")
+        if pw_min_children < 1:
+            raise ValueError(f"pw_min_children must be >= 1; got {pw_min_children}")
     rng = rng if rng is not None else np.random.default_rng()
+    pw_ctx = (
+        PWContext(root_player=root_player, alpha=pw_alpha, min_children=pw_min_children)
+        if progressive_widening
+        else None
+    )
 
     root = RaveNode(root_state.copy())
-    populate_untried(root)
-    _run_iterations_rave(root, iterations, c, k, rng)
+    populate_untried(root, pw_ctx=pw_ctx)
+    _run_iterations_rave(root, iterations, c, k, rng, pw_ctx=pw_ctx)
     return _robust_child(root, rng)
 
 
@@ -376,11 +403,21 @@ class RaveAgent:
         rng: np.random.Generator | None = None,
         reuse_tree: bool = True,
         name: str = "rave",
+        progressive_widening: bool = False,
+        pw_alpha: float = 0.5,
+        pw_min_children: int = 1,
     ) -> None:
         if iterations < 1:
             raise ValueError(f"iterations must be >= 1; got {iterations}")
         if k <= 0:
             raise ValueError(f"k must be > 0; got {k}")
+        if progressive_widening:
+            if pw_alpha <= 0:
+                raise ValueError(f"pw_alpha must be > 0; got {pw_alpha}")
+            if pw_min_children < 1:
+                raise ValueError(
+                    f"pw_min_children must be >= 1; got {pw_min_children}"
+                )
         self._iterations: int = iterations
         self._c: float = c
         self._k: float = k
@@ -389,6 +426,9 @@ class RaveAgent:
         )
         self._reuse_tree: bool = reuse_tree
         self.name = name
+        self._progressive_widening: bool = progressive_widening
+        self._pw_alpha: float = pw_alpha
+        self._pw_min_children: int = pw_min_children
         self._root: RaveNode | None = None
         self._snapshot: RootSnapshot | None = None
         self.last_search_stats = {}
@@ -418,14 +458,24 @@ class RaveAgent:
 
         iters = max_iterations if max_iterations is not None else self._iterations
 
+        pw_ctx: PWContext | None = (
+            PWContext(
+                root_player=player_id,
+                alpha=self._pw_alpha,
+                min_children=self._pw_min_children,
+            )
+            if self._progressive_widening
+            else None
+        )
+
         root = self._maybe_reuse_root(state, player_id)
         if root is None:
             root = RaveNode(state.copy())
-            populate_untried(root)
+            populate_untried(root, pw_ctx=pw_ctx)
 
         t0 = time.perf_counter()
         max_depth = _run_iterations_rave(
-            root, iters, self._c, self._k, self._rng
+            root, iters, self._c, self._k, self._rng, pw_ctx=pw_ctx
         )
         elapsed = time.perf_counter() - t0
 
@@ -442,6 +492,8 @@ class RaveAgent:
             },
             "time_s": elapsed,
             "amaf_entries": _count_amaf_entries(root),
+            "pw_enabled": self._progressive_widening,
+            "pw_deferred_total": _count_pw_deferred(root),
         }
         return action
 
