@@ -34,7 +34,7 @@ from territory_takeover.constants import DIRECTIONS
 from territory_takeover.engine import step
 
 from .node import MCTSNode
-from .rollout import RolloutFn, _terminal_value, uniform_rollout
+from .rollout import RolloutFn, _terminal_value, make_rollout, uniform_rollout
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -295,17 +295,27 @@ class UCTAgent:
         iterations: int,
         c: float = 1.4,
         rollout_fn: RolloutFn | None = None,
+        rollout_kind: str | None = None,
         rng: np.random.Generator | None = None,
         reuse_tree: bool = True,
         name: str = "uct",
     ) -> None:
         if iterations < 1:
             raise ValueError(f"iterations must be >= 1; got {iterations}")
+        if rollout_fn is not None and rollout_kind is not None:
+            raise ValueError(
+                "pass either rollout_fn or rollout_kind, not both"
+            )
         self._iterations: int = iterations
         self._c: float = c
-        self._rollout_fn: RolloutFn = (
-            rollout_fn if rollout_fn is not None else uniform_rollout
-        )
+        resolved: RolloutFn
+        if rollout_fn is not None:
+            resolved = rollout_fn
+        elif rollout_kind is not None:
+            resolved = make_rollout(rollout_kind)
+        else:
+            resolved = uniform_rollout
+        self._rollout_fn: RolloutFn = resolved
         self._rng: np.random.Generator = (
             rng if rng is not None else np.random.default_rng()
         )
