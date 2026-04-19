@@ -37,6 +37,7 @@ class MCTSNode:
         "incoming_action",
         "parent",
         "player_to_move",
+        "pw_reserve",
         "state",
         "terminal",
         "terminal_value",
@@ -61,6 +62,12 @@ class MCTSNode:
         self.total_value: NDArray[np.float64] = np.zeros(len(state.players), dtype=np.float64)
         self.terminal: bool = state.done
         self.terminal_value: NDArray[np.float64] | None = None
+        # Progressive widening reserve: actions ranked by heuristic but deferred
+        # from `untried_actions` until `parent.visits ** pw_alpha` grows enough
+        # to reveal them. ``None`` when PW is inactive at this node (the common
+        # case); non-None = PW was applied here and holds the not-yet-visible
+        # suffix sorted descending by score.
+        self.pw_reserve: list[int] | None = None
 
     def is_fully_expanded(self) -> bool:
         # Fully expanded iff at least one child has been attached and no

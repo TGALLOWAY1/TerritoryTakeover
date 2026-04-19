@@ -121,6 +121,8 @@ def test_rave_agent_plays_full_game_and_stats_populated() -> None:
                 "root_visits",
                 "time_s",
                 "amaf_entries",
+                "pw_enabled",
+                "pw_deferred_total",
             }, f"trial={i} stats keys: {set(stats.keys())}"
             assert stats["amaf_entries"] > 0
             assert set(stats["root_visits"].keys()) == {0, 1, 2, 3}
