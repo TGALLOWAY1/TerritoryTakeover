@@ -63,13 +63,21 @@ RolloutFn = Callable[["GameState", np.random.Generator], "NDArray[np.float64]"]
 # sampling distributions.
 _W_REACH: float = 1.0
 _W_ENCLOSE: float = 3.0
-_W_TRAP_PENALTY: float = 5.0
-_W_OPPONENT: float = 0.05
 _W_VORONOI: float = 0.2
 _TAU: float = 0.5
 _IDENTICAL_SCORE_EPS: float = 1e-9
 _DEFAULT_EPSILON: float = 0.15
 _DEFAULT_VORONOI_K: int = 4
+
+# Hard dead-end / near-trap penalties. Empirically chosen: gentler values
+# (e.g. a flat -5 on near-trap) produced a rollout that was no stronger than
+# uniform in matched-iteration tournaments. Making the dead-end case
+# unambiguously dominated and the near-trap case strongly discouraged moves
+# MCTS's leaf values closer to a sensible "don't voluntarily trap yourself"
+# baseline. The magnitudes exceed any other score component so softmax with
+# ``tau = 0.5`` assigns trap moves effectively zero probability.
+_TRAP_SCORE_DEADEND: float = -100.0
+_TRAP_SCORE_SINGLE_EXIT: float = -10.0
 
 
 def _terminal_value(state: GameState) -> NDArray[np.float64]:
@@ -110,29 +118,6 @@ def uniform_rollout(
     return _terminal_value(state)
 
 
-def _nearest_opponent_distance(
-    state: GameState, player_id: int, target: tuple[int, int]
-) -> int:
-    """Manhattan distance from ``target`` to the nearest living opponent's head.
-
-    Returns 0 when no other living player exists (single-player remnant at
-    game end). The contract is "higher is safer", so 0 means no safety
-    signal one way or the other.
-    """
-    tr, tc = target
-    best = 0
-    found = False
-    for p in state.players:
-        if p.player_id == player_id or not p.alive:
-            continue
-        hr, hc = p.head
-        d = abs(tr - hr) + abs(tc - hc)
-        if not found or d < best:
-            best = d
-            found = True
-    return best
-
-
 def _score_action(
     state: GameState,
     player_id: int,
@@ -143,13 +128,24 @@ def _score_action(
 ) -> float:
     """Compute the soft-score of playing ``action`` from the current head.
 
-    Combines four cheap components (reach proxy, enclosure bonus via a rare
-    simulation branch, near-trap penalty, opponent-distance bonus) plus an
-    optional Voronoi-centroid pull used by :func:`voronoi_guided_rollout`.
-    Budget target is well under 10 us for the baseline case; the enclosure
-    branch does a full ``state.copy() + step()`` but only fires when the
-    target cell is adjacent to a same-player path tile other than the
-    current head.
+    Three components survived matched-iteration tournament testing:
+
+    - a steep near-trap penalty (hard-avoid dead-ends, strongly avoid
+      single-exit cells, otherwise reward by empty-neighbor count),
+    - an enclosure-closure bonus that runs a full ``state.copy() + step()``
+      when the candidate is adjacent to a same-player path tile other than
+      the current head and reads the real ``claimed_count`` delta (a flat
+      bonus without simulation was measurably *worse* than uniform — the
+      trigger fires on many moves that touch own-path without enclosing
+      anything),
+    - an optional Voronoi-centroid pull used only by
+      :func:`voronoi_guided_rollout`.
+
+    An opponent-distance bonus was tried and dropped; at the 200-iteration
+    / 10x10 benchmark it added variance without improving win rate. The
+    enclosure branch fires on ~25% of scored actions under random-ish play
+    so amortized cost is ~25 us per move, above the original 10 us design
+    target but a clear net win at matched iterations (measured).
     """
     dr, dc = DIRECTIONS[action]
     tr = head_r + dr
@@ -170,25 +166,19 @@ def _score_action(
     if tc < w - 1 and grid.item(tr, tc + 1) == EMPTY:
         empty_neighbors += 1
 
-    score = _W_REACH * float(empty_neighbors)
+    # Steep trap schedule: a move that traps immediately is essentially
+    # disqualified; single-exit moves are strongly discouraged; beyond that,
+    # more empty neighbors is linearly better.
+    if empty_neighbors == 0:
+        score = _TRAP_SCORE_DEADEND
+    elif empty_neighbors == 1:
+        score = _TRAP_SCORE_SINGLE_EXIT
+    else:
+        score = _W_REACH * float(empty_neighbors)
 
-    # Near-trap: after this move the head sits at t with empty_neighbors
-    # available exits. One exit means the seat is one bad step from dying.
-    if empty_neighbors == 1:
-        score -= _W_TRAP_PENALTY
-
-    # Enclosure-closure bonus. Trigger check is cheap (~4 lookups): is any
-    # 4-neighbor of t a same-player path tile other than the current head?
-    # A flat bonus on trigger alone hurt playing strength in testing — the
-    # trigger fires on many moves that touch own-path without actually
-    # enclosing anything, and rewarding those biases the rollout into bad
-    # patterns. So when the trigger fires we pay the cost of a full
-    # ``state.copy() + step()`` to read the true claimed_count delta and
-    # reward only moves that actually close a pocket. Trigger fires ~25%
-    # of scored actions under random-ish play, so amortized per-move cost
-    # is ~25 us (one copy+step per move on average). This is above the
-    # 10 us design target but a clear win in head-to-head matchups — the
-    # rollout's leaf value needs honest enclosure accounting to be useful.
+    # Enclosure-closure bonus. Cheap trigger check (~4 lookups). When it
+    # fires we pay a full ``state.copy() + step()`` to read the true
+    # ``claimed_count`` delta and reward only real loop closures.
     if len(state.players[player_id].path) >= 4:
         own_code = PATH_CODES[player_id]
         trigger = False
@@ -215,12 +205,6 @@ def _score_action(
             delta = succ.players[player_id].claimed_count - baseline
             if delta > 0:
                 score += _W_ENCLOSE * float(delta)
-
-    # Pull away from nearest opponent head by a very small amount. The
-    # weight is intentionally tiny so it only breaks ties among otherwise
-    # equivalent reach-scored moves.
-    dist_opp = _nearest_opponent_distance(state, player_id, (tr, tc))
-    score += _W_OPPONENT * float(dist_opp)
 
     # Voronoi pull (only when running voronoi_guided_rollout and the player
     # actually owns territory in the current partition).
