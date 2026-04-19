@@ -1,5 +1,15 @@
-"""MCTS subpackage — placeholder. Individual modules not yet implemented."""
+"""MCTS subpackage: tree node, UCT search, and rollout policies."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .node import MCTSNode
+from .rollout import RolloutFn, uniform_rollout
+from .uct import UCTAgent, uct_search
+
+__all__ = [
+    "MCTSNode",
+    "RolloutFn",
+    "UCTAgent",
+    "uct_search",
+    "uniform_rollout",
+]
