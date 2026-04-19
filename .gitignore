@@ -23,3 +23,8 @@ env/
 .vscode/
 .idea/
 .DS_Store
+
+# Training / evaluation run artifacts (checkpoints, TB events, CSVs, PNGs).
+# Reference artifacts for KEY_FINDINGS.md are committed explicitly via
+# `git add -f` once a run completes.
+results/
