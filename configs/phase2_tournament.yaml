@@ -1,0 +1,61 @@
+# Phase-2 tournament: baseline and MCTS agent variants on 20x20 4-player boards.
+#
+# Run with:
+#   python scripts/run_tournament.py --config configs/phase2_tournament.yaml
+#
+# Modes: "match" (single 4-way free-for-all with cyclic seat rotation) or
+# "round_robin" (every unordered pair in a 2-vs-2 turn-alternating layout).
+
+mode: round_robin
+board_size: 20
+num_players: 4
+games_per_pair: 8
+seed: 0
+parallel: true
+
+agents:
+  - name: random
+    class: UniformRandomAgent
+    kwargs: {}
+
+  - name: greedy
+    class: HeuristicGreedyAgent
+    kwargs:
+      evaluator: default
+
+  - name: paranoid-d3
+    class: ParanoidAgent
+    kwargs:
+      depth: 3
+      evaluator: default
+
+  - name: maxn-d3
+    class: MaxNAgent
+    kwargs:
+      depth: 3
+      evaluator: default
+
+  - name: uct-uniform-500
+    class: UCTAgent
+    kwargs:
+      iterations: 500
+      rollout_kind: uniform
+
+  - name: uct-informed-500
+    class: UCTAgent
+    kwargs:
+      iterations: 500
+      rollout_kind: informed
+
+  - name: rave-informed-500
+    class: RaveAgent
+    kwargs:
+      iterations: 500
+      rollout_kind: informed
+
+  - name: uct-informed-500-pw
+    class: UCTAgent
+    kwargs:
+      iterations: 500
+      rollout_kind: informed
+      progressive_widening: true
