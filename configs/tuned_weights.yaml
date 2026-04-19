@@ -1,0 +1,14 @@
+stage_a_greedy:
+  choke_pressure: 0.15516026441244457
+  enclosure_potential_area: -2.0
+  mobility: 0.7689710805013966
+  opponent_distance: -0.09454498138461259
+  reachable_area: 0.23417678850495594
+  territory_total: 2.0
+stage_b_paranoid_d2:
+  choke_pressure: -1.379903612092347
+  enclosure_potential_area: -0.2261739286304626
+  mobility: 2.0
+  opponent_distance: 1.0124056472484917
+  reachable_area: -0.018845003573330132
+  territory_total: 0.4120225796253494
