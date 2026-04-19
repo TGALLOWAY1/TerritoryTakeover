@@ -16,7 +16,7 @@ tree reuse across successive calls in the same game — the standard MCTS
 optimization where the subtree below the actually-played joint move is
 promoted to the new root, preserving the visit counts already invested
 there. Reconstruction of the played action sequence is done from
-:attr:`PlayerState.path` deltas (see :func:`_reconstruct_actions`); any
+:attr:`PlayerState.path` deltas (see :func:`reconstruct_actions`); any
 anomaly (missing child, player mismatch, illegal move flagged dead)
 falls back to rebuilding from scratch — never silent corruption.
 """
@@ -112,8 +112,13 @@ def _backpropagate(node: MCTSNode, value: NDArray[np.float64]) -> None:
         cur = cur.parent
 
 
-def _populate_untried(node: MCTSNode) -> None:
-    """Initialize ``untried_actions`` from the engine's legal-action enumerator."""
+def populate_untried(node: MCTSNode) -> None:
+    """Initialize ``untried_actions`` from the engine's legal-action enumerator.
+
+    Package-internal helper; shared with :mod:`territory_takeover.search.mcts.rave`
+    so RAVE can reuse the same lazy-expansion semantics. Not part of the public
+    API (absent from ``__all__``).
+    """
     if node.terminal:
         return
     node.untried_actions = list(
@@ -178,19 +183,22 @@ def uct_search(
     rollout_fn = rollout_fn if rollout_fn is not None else uniform_rollout
 
     root = MCTSNode(root_state.copy())
-    _populate_untried(root)
+    populate_untried(root)
     _run_iterations(root, iterations, c, rollout_fn, rng)
     return _robust_child(root, rng)
 
 
 @dataclass(frozen=True, slots=True)
-class _RootSnapshot:
+class RootSnapshot:
     """Minimal record of the root state used to detect descent on the next call.
 
     All fields are immutable / value-typed so the snapshot is safe to
     keep alongside a mutable :class:`MCTSNode`. ``path_lens`` and
     ``alive`` are tuples (one entry per player) so equality checks are
     cheap.
+
+    Package-internal: shared with :mod:`territory_takeover.search.mcts.rave`
+    but intentionally omitted from ``__all__``.
     """
 
     current_player: int
@@ -200,8 +208,8 @@ class _RootSnapshot:
     alive: tuple[bool, ...]
 
 
-def _snapshot_state(state: GameState) -> _RootSnapshot:
-    return _RootSnapshot(
+def snapshot_state(state: GameState) -> RootSnapshot:
+    return RootSnapshot(
         current_player=state.current_player,
         turn_number=state.turn_number,
         path_lens=tuple(len(p.path) for p in state.players),
@@ -210,8 +218,8 @@ def _snapshot_state(state: GameState) -> _RootSnapshot:
     )
 
 
-def _reconstruct_actions(
-    snapshot: _RootSnapshot, state: GameState
+def reconstruct_actions(
+    snapshot: RootSnapshot, state: GameState
 ) -> list[int] | None:
     """Reconstruct the action sequence played between ``snapshot`` and ``state``.
 
@@ -322,7 +330,7 @@ class UCTAgent:
         self._reuse_tree: bool = reuse_tree
         self.name = name
         self._root: MCTSNode | None = None
-        self._snapshot: _RootSnapshot | None = None
+        self._snapshot: RootSnapshot | None = None
         self.last_search_stats = {}
 
     def reset(self) -> None:
@@ -353,7 +361,7 @@ class UCTAgent:
         root = self._maybe_reuse_root(state, player_id)
         if root is None:
             root = MCTSNode(state.copy())
-            _populate_untried(root)
+            populate_untried(root)
 
         t0 = time.perf_counter()
         max_depth = _run_iterations(
@@ -364,7 +372,7 @@ class UCTAgent:
         action = _robust_child(root, self._rng)
 
         self._root = root
-        self._snapshot = _snapshot_state(state)
+        self._snapshot = snapshot_state(state)
         self.last_search_stats = {
             "iterations": iters,
             "max_depth": max_depth,
@@ -380,7 +388,7 @@ class UCTAgent:
         """Return a re-rooted MCTSNode for ``state`` if descent is possible, else None."""
         if not self._reuse_tree or self._root is None or self._snapshot is None:
             return None
-        actions = _reconstruct_actions(self._snapshot, state)
+        actions = reconstruct_actions(self._snapshot, state)
         if actions is None:
             return None
         node: MCTSNode = self._root
@@ -395,7 +403,7 @@ class UCTAgent:
         # and the older subtrees can be garbage collected.
         node.parent = None
         if not node.terminal and not node.children and not node.untried_actions:
-            _populate_untried(node)
+            populate_untried(node)
         return node
 
 
