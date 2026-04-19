@@ -1,0 +1,35 @@
+total_seconds: 1821.8640876150002
+final_q_table_size: 7909
+num_episodes: 500000
+config:
+  board_size: 8
+  num_players: 2
+  spawn_positions:
+  - - 0
+    - 0
+  - - 7
+    - 7
+  num_episodes: 500000
+  eval_every: 10000
+  eval_games_vs_random: 200
+  eval_games_vs_greedy: 200
+  eval_games_vs_uct: 50
+  uct_iters: 32
+  checkpoint_every: 50000
+  q:
+    alpha: 0.1
+    gamma: 0.99
+    eps_start: 1.0
+    eps_end: 0.05
+    eps_decay_fraction: 0.5
+    total_episodes: 500000
+  reward:
+    per_cell_gain: 1.0
+    trap_penalty_per_cell: 1.0
+    rank_bonuses:
+    - 10.0
+    - 3.0
+    - -3.0
+    - -10.0
+  seed: 0
+  out_dir: results/phase3a

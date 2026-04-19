@@ -1,0 +1,26 @@
+board_size: 10
+num_players: 4
+# 10x10 has well-defined default 4p spawns (insets at (4,4),(4,5),(5,4),(5,5)
+# are center-clustered but valid). Override here with proper corner spawns.
+spawn_positions: [[0, 0], [0, 9], [9, 0], [9, 9]]
+num_episodes: 500000
+eval_every: 10000
+eval_games_vs_random: 200
+eval_games_vs_greedy: 100
+# UCT eval on 4p is expensive; disable for the 10x10 diagnostic.
+eval_games_vs_uct: 0
+uct_iters: 32
+checkpoint_every: 50000
+q:
+  alpha: 0.1
+  gamma: 0.99
+  eps_start: 1.0
+  eps_end: 0.05
+  eps_decay_fraction: 0.5
+  total_episodes: 500000
+reward:
+  per_cell_gain: 1.0
+  trap_penalty_per_cell: 1.0
+  rank_bonuses: [10.0, 3.0, -3.0, -10.0]
+seed: 0
+out_dir: results/phase3a

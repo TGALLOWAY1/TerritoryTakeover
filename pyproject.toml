@@ -13,6 +13,7 @@ dependencies = ["numpy>=1.26"]
 gym = ["gymnasium>=0.29"]
 viz = ["matplotlib>=3.7", "pillow>=10"]
 tournament = ["pyyaml>=6"]
+rl = ["pyyaml>=6", "matplotlib>=3.7", "tensorboardX>=2.6"]
 dev = [
     "pytest>=8",
     "ruff>=0.5",
@@ -20,6 +21,8 @@ dev = [
     "gymnasium>=0.29",
     "matplotlib>=3.7",
     "pillow>=10",
+    "pyyaml>=6",
+    "tensorboardX>=2.6",
 ]
 
 [tool.setuptools.packages.find]
@@ -55,6 +58,10 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "benchmarks.*"
 ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["yaml.*", "tensorboardX.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
