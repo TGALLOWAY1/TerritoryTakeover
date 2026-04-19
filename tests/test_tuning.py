@@ -20,7 +20,7 @@ from territory_takeover.search import (
 )
 
 
-def _greedy_factory(weights: dict) -> HeuristicGreedyAgent:
+def _greedy_factory(weights: dict[str, float]) -> HeuristicGreedyAgent:
     # Fresh LinearEvaluator each call so no feature cache is shared.
     return HeuristicGreedyAgent(evaluator=LinearEvaluator(weights), name="cand")
 
