@@ -1,0 +1,44 @@
+{
+  "arms": {
+    "curriculum": {
+      "n_seeds": 3,
+      "n_seeds_with_enclosure": 3,
+      "final_win_rate_vs_random_mean": 0.7083333333333334,
+      "final_win_rate_vs_random_95ci": [
+        0.625,
+        0.875
+      ],
+      "first_enclosure_step_mean": 27.666666666666668,
+      "total_steps_mean": 1601.3333333333333
+    },
+    "direct": {
+      "n_seeds": 3,
+      "n_seeds_with_enclosure": 3,
+      "final_win_rate_vs_random_mean": 0.4375,
+      "final_win_rate_vs_random_95ci": [
+        0.3125,
+        0.5625
+      ],
+      "first_enclosure_step_mean": 57.333333333333336,
+      "total_steps_mean": 1416.6666666666667
+    }
+  },
+  "test_win_rate": {
+    "arm_a": "curriculum",
+    "arm_b": "direct",
+    "welch_t": 2.4567690745599777,
+    "welch_p_approx": 0.014019277113960005,
+    "mann_whitney_u": 9.0,
+    "rank_biserial": -1.0,
+    "cohens_d": 2.0059435495071956
+  },
+  "test_first_enclosure": {
+    "arm_a": "curriculum",
+    "arm_b": "direct",
+    "welch_t": -3.6455820463097304,
+    "welch_p_approx": 0.00026678727795959034,
+    "mann_whitney_u": 0.0,
+    "rank_biserial": 1.0,
+    "cohens_d": -2.9766052763033977
+  }
+}

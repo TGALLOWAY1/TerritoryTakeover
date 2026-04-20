@@ -1,0 +1,7 @@
+arm,seed,total_self_play_steps,final_stage_steps,final_win_rate_vs_random,first_enclosure_step,wall_clock_seconds
+curriculum,0,1751,863,0.8750,28,68.14
+direct,0,1665,1665,0.3125,54,66.91
+curriculum,1,1258,408,0.6250,37,43.24
+direct,1,1578,1578,0.5625,49,63.68
+curriculum,2,1795,923,0.6250,18,70.09
+direct,2,1007,1007,0.4375,69,38.13
