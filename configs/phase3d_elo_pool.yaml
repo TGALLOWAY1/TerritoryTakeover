@@ -1,14 +1,14 @@
 # Phase 3d Elo round-robin pool.
 #
-# Anchor = uniform-random at Elo 0. The pool covers:
-#   * the two non-learned baselines (random, greedy)
-#   * the six trained agents from the headline ablation
-#     (curriculum arm x 3 seeds, direct arm x 3 seeds)
-#   * the reference agent archived under docs/phase3d/.
+# Anchor = uniform-random at Elo 0. All AlphaZero entries use
+# iterations = 4 to keep wall-clock tractable; this is below the
+# ablation's training-time puct_iterations = 8 so the Elo is a
+# conservative estimate of the agent's playing strength.
 #
-# All entries use the 10x10 / 2p setting matching the trained checkpoints.
-# The AlphaZero entries point at net_final.pt under each run's out dir;
-# update paths after running the ablation.
+# The reference agent is docs/phase3d/net_reference.pt (= the
+# curriculum arm, seed 0, the best run from the headline ablation).
+# It is also listed as curriculum_seed0 in the pool so the reference's
+# Elo equals that agent's Elo directly.
 
 agents:
   - name: random
@@ -26,7 +26,7 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_curriculum_seed_0/net_final.pt
 
@@ -39,7 +39,7 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_curriculum_seed_1/net_final.pt
 
@@ -52,7 +52,7 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_curriculum_seed_2/net_final.pt
 
@@ -65,7 +65,7 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_direct_seed_0/net_final.pt
 
@@ -78,7 +78,7 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_direct_seed_1/net_final.pt
 
@@ -91,19 +91,6 @@ agents:
       channels: 32
       value_hidden: 32
       head_type: conv
-      iterations: 16
+      iterations: 4
       c_puct: 1.25
       checkpoint: results/phase3d/ablation/arm_direct_seed_2/net_final.pt
-
-  - name: reference
-    kind: alphazero
-    params:
-      board_size: 10
-      num_players: 2
-      num_res_blocks: 2
-      channels: 32
-      value_hidden: 32
-      head_type: conv
-      iterations: 32
-      c_puct: 1.25
-      checkpoint: docs/phase3d/net_reference.pt
