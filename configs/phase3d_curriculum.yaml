@@ -1,0 +1,72 @@
+# Phase 3d curriculum config (reduced-scope).
+#
+# Scope note: the original prompt targets 40x40 / 4p. Under a single-session
+# CPU budget that's not feasible (self-play on 40x40 is seconds/step). This
+# config targets 10x10 / 2p as the "large" end of the curriculum so the
+# headline ablation (curriculum vs direct) is defensible within the budget.
+# Scaling to larger boards is deferred to a future phase; the architecture
+# and schedule are both board-size-agnostic.
+#
+# Curriculum:
+#   s0: 6x6 / 2p  -> learn basic head-adjacent moves
+#   s1: 8x8 / 2p  -> transfer, larger exploration space
+#   s2: 10x10 / 2p -> final target; must master enclosure
+
+net:
+  num_res_blocks: 2
+  channels: 32
+  value_hidden: 32
+  head_type: conv
+
+train:
+  batch_size: 32
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 20000
+  eval_games_per_check: 8
+  iterations_per_eval: 1
+
+curriculum:
+  stages:
+    - name: s0_6x6_2p
+      board_size: 6
+      num_players: 2
+      puct_iterations: 16
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 6
+      max_half_moves: 80
+      promotion:
+        max_self_play_steps: 1500
+        elo_gain_window: 5
+        elo_gain_threshold: 8.0
+        min_evaluations: 5
+
+    - name: s1_8x8_2p
+      board_size: 8
+      num_players: 2
+      puct_iterations: 16
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 8
+      max_half_moves: 120
+      promotion:
+        max_self_play_steps: 2500
+        elo_gain_window: 5
+        elo_gain_threshold: 8.0
+        min_evaluations: 5
+
+    - name: s2_10x10_2p
+      board_size: 10
+      num_players: 2
+      puct_iterations: 16
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 10
+      max_half_moves: 160
+      promotion:
+        max_self_play_steps: 4000
+        elo_gain_window: 5
+        elo_gain_threshold: 8.0
+        min_evaluations: 5
