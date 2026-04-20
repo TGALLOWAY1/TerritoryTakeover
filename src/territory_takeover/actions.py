@@ -60,6 +60,26 @@ def legal_actions(state: GameState, player_id: int) -> list[int]:
     return out
 
 
+def has_any_legal_action(state: GameState, player_id: int) -> bool:
+    """Return True iff the player has at least one legal action.
+
+    Short-circuits on the first legal direction — avoids the list allocation
+    from :func:`legal_actions` when only the yes/no answer is needed. Used by
+    the engine's turn-advance loop where the candidate-player check fires
+    multiple times per `step` in the late game.
+    """
+    r, c = state.players[player_id].head
+    h, w = state.grid.shape
+    g = state.grid
+    if r > 0 and g.item(r - 1, c) == EMPTY:
+        return True
+    if r < h - 1 and g.item(r + 1, c) == EMPTY:
+        return True
+    if c > 0 and g.item(r, c - 1) == EMPTY:
+        return True
+    return bool(c < w - 1 and g.item(r, c + 1) == EMPTY)
+
+
 def action_to_coord(
     state: GameState, player_id: int, action: int
 ) -> tuple[int, int]:
