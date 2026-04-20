@@ -1,0 +1,61 @@
+# Phase 3d reference agent config.
+#
+# Mirrors configs/phase3d_curriculum_fast.yaml — the exact settings used
+# to train docs/phase3d/net_reference.pt (selected as curriculum arm,
+# seed 0, which achieved the highest final win rate vs random in the
+# headline ablation: 0.875 at 28-step first enclosure).
+#
+# To reproduce:
+#   python scripts/train_curriculum.py \
+#       --config configs/phase3d_curriculum_fast.yaml \
+#       --seed 0 \
+#       --out-dir results/phase3d/runs/ref
+#
+# The resulting net_final.pt is the archived reference checkpoint.
+
+net:
+  num_res_blocks: 2
+  channels: 32
+  value_hidden: 32
+  head_type: conv
+
+train:
+  batch_size: 32
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 10000
+  eval_games_per_check: 8
+  iterations_per_eval: 1
+
+curriculum:
+  stages:
+    - name: s0_6x6_2p
+      board_size: 6
+      num_players: 2
+      puct_iterations: 8
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 6
+      max_half_moves: 80
+      promotion: {max_self_play_steps: 300, elo_gain_window: 3, elo_gain_threshold: 8.0, min_evaluations: 3}
+
+    - name: s1_8x8_2p
+      board_size: 8
+      num_players: 2
+      puct_iterations: 8
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 8
+      max_half_moves: 120
+      promotion: {max_self_play_steps: 500, elo_gain_window: 3, elo_gain_threshold: 8.0, min_evaluations: 3}
+
+    - name: s2_10x10_2p
+      board_size: 10
+      num_players: 2
+      puct_iterations: 8
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 10
+      max_half_moves: 160
+      promotion: {max_self_play_steps: 800, elo_gain_window: 3, elo_gain_threshold: 8.0, min_evaluations: 3}

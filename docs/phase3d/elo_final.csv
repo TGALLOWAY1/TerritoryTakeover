@@ -1,0 +1,9 @@
+agent,elo_vs_anchor,anchor
+direct_seed1,88.60,random
+curriculum_seed2,82.95,random
+direct_seed2,33.03,random
+greedy,33.03,random
+curriculum_seed0,22.04,random
+random,0.00,random
+curriculum_seed1,-16.66,random
+direct_seed0,-22.25,random

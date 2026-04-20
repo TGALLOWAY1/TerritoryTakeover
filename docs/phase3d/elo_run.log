@@ -1,0 +1,11 @@
+[elo] agents (8): ['random', 'greedy', 'curriculum_seed0', 'curriculum_seed1', 'curriculum_seed2', 'direct_seed0', 'direct_seed1', 'direct_seed2']
+[elo] 224 pairwise outcomes collected
+[elo] wrote docs/phase3d/elo_final.csv
+  direct_seed1                     +88.60
+  curriculum_seed2                 +82.95
+  direct_seed2                     +33.03
+  greedy                           +33.03
+  curriculum_seed0                 +22.04
+  random                            +0.00
+  curriculum_seed1                 -16.66
+  direct_seed0                     -22.25

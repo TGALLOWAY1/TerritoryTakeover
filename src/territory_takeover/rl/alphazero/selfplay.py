@@ -80,6 +80,27 @@ def play_game(
     target is the same per-seat vector for every sample in the game,
     computed once at termination via :func:`_terminal_value_normalized`.
     """
+    samples, _ = play_game_instrumented(
+        evaluator, cfg, rng=rng, seed=seed, spawn_positions=spawn_positions
+    )
+    return samples
+
+
+def play_game_instrumented(
+    evaluator: NNEvaluator,
+    cfg: SelfPlayConfig,
+    rng: np.random.Generator,
+    seed: int | None = None,
+    spawn_positions: list[tuple[int, int]] | None = None,
+) -> tuple[list[Sample], int | None]:
+    """Self-play driver with Phase 3d first-enclosure instrumentation.
+
+    Returns ``(samples, first_enclosure_half_move)`` where the second
+    element is the half-move index at which any player's
+    ``claimed_count`` first became non-zero, or ``None`` if no enclosure
+    occurred in this game. The check is a single integer read per
+    half-move; the hot path is unaffected.
+    """
     state = new_game(
         board_size=cfg.board_size,
         num_players=cfg.num_players,
@@ -95,6 +116,7 @@ def play_game(
         ]
     ] = []
 
+    first_enclosure_half_move: int | None = None
     half_move = 0
     while not state.done:
         if cfg.max_half_moves is not None and half_move >= cfg.max_half_moves:
@@ -121,11 +143,17 @@ def play_game(
         step(state, action, strict=False)
         half_move += 1
 
+        if first_enclosure_half_move is None and any(
+            p.claimed_count > 0 for p in state.players
+        ):
+            first_enclosure_half_move = half_move
+
     final = _normalized_final_scores(state)
-    return [
+    samples = [
         Sample(grid=g, scalars=s, mask=m, visits=v, final_scores=final)
         for (g, s, m, v) in samples_pending
     ]
+    return samples, first_enclosure_half_move
 
 
-__all__ = ["SelfPlayConfig", "play_game"]
+__all__ = ["SelfPlayConfig", "play_game", "play_game_instrumented"]
