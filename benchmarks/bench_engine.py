@@ -24,7 +24,7 @@ from typing import Any
 
 import numpy as np
 
-from territory_takeover import GameState, new_game, step
+from territory_takeover import GameState, new_game, simulate_random_rollout, step
 from territory_takeover.actions import legal_actions
 from territory_takeover.constants import DIRECTIONS, PATH_CODES
 
@@ -380,6 +380,57 @@ def bench_rollout_throughput(iters: int, board_size: int = 40) -> TimingResult:
     )
 
 
+def bench_rollout_fastpath_throughput(
+    iters: int, board_size: int = 40
+) -> TimingResult:
+    """Same as `bench_rollout_throughput` but uses the `simulate_random_rollout`
+    fast path instead of a `step()` loop.
+
+    `simulate_random_rollout` skips the `StepResult`/`info`/numpy mask
+    allocations per half-move and inlines the legality + coord + enclosure
+    path into one tight Python loop. This bench isolates that gain from the
+    `step()`-based rollout cost measured by `bench_rollout_throughput`.
+    """
+    plies = int(100 * (board_size / 40) ** 2)
+    base = _make_midgame_state(board_size=board_size, plies=plies, seed=42)
+
+    for _ in range(5):
+        rng = random.Random(0)
+        simulate_random_rollout(base.copy(), rng)
+
+    samples = np.empty(iters, dtype=np.int64)
+    total_t0 = time.perf_counter_ns()
+    for i in range(iters):
+        rng = random.Random(i + 1)
+        rollout_state = base.copy()
+        t0 = time.perf_counter_ns()
+        simulate_random_rollout(rollout_state, rng)
+        samples[i] = time.perf_counter_ns() - t0
+    total_elapsed_s = (time.perf_counter_ns() - total_t0) / 1e9
+    games_per_sec = iters / total_elapsed_s
+
+    p50, p90, p99 = _percentiles_us(samples)
+
+    return TimingResult(
+        name=f"bench_rollout_fastpath_throughput_{board_size}",
+        min_us=float(samples.min()) / 1000.0,
+        median_us=float(np.median(samples)) / 1000.0,
+        mean_us=float(samples.mean()) / 1000.0,
+        iters=iters,
+        target_us=None,
+        p50_us=p50,
+        p90_us=p90,
+        p99_us=p99,
+        extra={
+            "board_size": float(board_size),
+            "games_per_sec": games_per_sec,
+            "games_per_min": games_per_sec * 60.0,
+            "target_games_per_sec": 1000.0,
+            "games_per_sec_pass": float(games_per_sec >= 1000.0),
+        },
+    )
+
+
 def bench_trigger_fire_rate(
     games: int = 50,
     board_size: int = 40,
@@ -505,7 +556,9 @@ def _print_table(results: list[TimingResult]) -> None:
                 f"{'wasted':>14}"
             )
             continue
-        if r.name.startswith("bench_rollout_throughput"):
+        if r.name.startswith(
+            ("bench_rollout_throughput", "bench_rollout_fastpath_throughput")
+        ):
             assert r.extra is not None
             gps = r.extra["games_per_sec"]
             target = r.extra["target_games_per_sec"]
@@ -732,6 +785,11 @@ def main() -> int:
         rollout_iters = max(50, int(s(500) / max(area_factor, 0.25)))
         results.append(bench_full_game_random(iters=game_iters, board_size=bs))
         results.append(bench_rollout_throughput(iters=rollout_iters, board_size=bs))
+        results.append(
+            bench_rollout_fastpath_throughput(
+                iters=rollout_iters, board_size=bs
+            )
+        )
         results.append(bench_trigger_fire_rate(games=max(10, s(50)), board_size=bs))
 
     _print_table(results)
