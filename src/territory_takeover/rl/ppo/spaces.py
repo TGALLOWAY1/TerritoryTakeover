@@ -1,4 +1,4 @@
-"""Observation encoder for Phase 3b PPO.
+"""Observation encoder and logit-level action masking for Phase 3b PPO.
 
 The encoder turns a :class:`GameState` into two float32 tensors that can be
 consumed by the actor-critic network (see :mod:`.network`):
@@ -23,20 +23,30 @@ consumed by the actor-critic network (see :mod:`.network`):
 
 Rotation is a pure channel / index permutation — the underlying player IDs
 are untouched, so this can be inverted at inference time if needed.
+
+Action masking uses a finite negative constant (``LOGIT_MASK_VALUE = -1e9``)
+rather than ``-inf``. That keeps softmax gradients well-defined in fp32 and
+numerically safe if the training loop ever drops to fp16.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
+import torch
 
+from territory_takeover.actions import legal_action_mask
 from territory_takeover.constants import CLAIMED_CODES, EMPTY, PATH_CODES
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from territory_takeover.state import GameState
+
+
+LOGIT_MASK_VALUE: Final[float] = -1e9
+"""Value substituted into illegal-action logits before softmax."""
 
 
 def _rotated_player_order(active_player: int, num_players: int) -> list[int]:
@@ -97,6 +107,58 @@ def encode_observation(
     return planes, scalars
 
 
+def legal_mask_array(state: GameState, player_id: int) -> NDArray[np.bool_]:
+    """Numpy bool mask of legal actions (shape ``(4,)``).
+
+    Thin wrapper over :func:`territory_takeover.actions.legal_action_mask`;
+    exists so downstream code can depend on :mod:`.spaces` without reaching
+    back into the engine module.
+    """
+    return legal_action_mask(state, player_id)
+
+
+def legal_mask_tensor(
+    state: GameState,
+    player_id: int,
+    *,
+    device: torch.device | str | None = None,
+) -> torch.Tensor:
+    """Torch bool tensor of legal actions (shape ``(4,)``).
+
+    ``device`` defaults to CPU. Callers doing vectorized rollout should build
+    the mask on CPU and move once per minibatch.
+    """
+    mask = legal_mask_array(state, player_id)
+    return torch.as_tensor(mask, dtype=torch.bool, device=device)
+
+
+def apply_action_mask(logits: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Substitute :data:`LOGIT_MASK_VALUE` at illegal positions.
+
+    ``logits`` is expected to be shape ``(..., 4)`` and ``mask`` is a bool
+    tensor of the same shape (or broadcastable). Legal positions keep their
+    logit; illegal positions are overwritten.
+
+    This must be applied BEFORE softmax so gradient flow through the policy
+    head is unaffected on legal actions — post-softmax masking would leave
+    gradient leaking into the illegal logits.
+    """
+    if logits.shape[-1] != mask.shape[-1]:
+        raise ValueError(
+            f"logits last dim {logits.shape[-1]} must match mask last dim "
+            f"{mask.shape[-1]}"
+        )
+    return torch.where(
+        mask.to(dtype=torch.bool),
+        logits,
+        torch.full_like(logits, LOGIT_MASK_VALUE),
+    )
+
+
 __all__ = [
+    "LOGIT_MASK_VALUE",
+    "apply_action_mask",
     "encode_observation",
+    "legal_mask_array",
+    "legal_mask_tensor",
 ]

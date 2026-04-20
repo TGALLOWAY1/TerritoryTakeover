@@ -1,12 +1,19 @@
-"""Tests for the PPO observation encoder."""
+"""Tests for the PPO observation encoder and action-mask helper."""
 
 from __future__ import annotations
 
 import numpy as np
+import torch
 
 from territory_takeover.constants import CLAIMED_CODES, PATH_CODES
 from territory_takeover.engine import new_game
-from territory_takeover.rl.ppo.spaces import encode_observation
+from territory_takeover.rl.ppo.spaces import (
+    LOGIT_MASK_VALUE,
+    apply_action_mask,
+    encode_observation,
+    legal_mask_array,
+    legal_mask_tensor,
+)
 from territory_takeover.state import GameState, PlayerState
 
 
@@ -159,3 +166,78 @@ def test_encode_observation_handles_dead_player_head() -> None:
     planes, _ = encode_observation(state, player_id=0)
     # Head channel is index 2N + 1.
     assert planes[2 * 2 + 1].sum() == 0.0
+
+
+def test_legal_mask_array_matches_engine_mask() -> None:
+    state = new_game(board_size=6, num_players=2, seed=3)
+    from territory_takeover.actions import legal_action_mask as engine_mask
+
+    for pid in range(2):
+        np.testing.assert_array_equal(
+            legal_mask_array(state, pid), engine_mask(state, pid)
+        )
+
+
+def test_legal_mask_tensor_dtype_and_shape() -> None:
+    state = new_game(board_size=6, num_players=2, seed=3)
+    t = legal_mask_tensor(state, 0)
+    assert t.dtype == torch.bool
+    assert t.shape == (4,)
+
+
+def test_apply_action_mask_replaces_illegal_logits() -> None:
+    logits = torch.tensor([0.5, -1.0, 2.0, 0.1])
+    mask = torch.tensor([True, False, True, False])
+    out = apply_action_mask(logits, mask)
+    assert out[0].item() == 0.5
+    assert out[2].item() == 2.0
+    assert out[1].item() == LOGIT_MASK_VALUE
+    assert out[3].item() == LOGIT_MASK_VALUE
+
+
+def test_apply_action_mask_softmax_is_zero_on_illegal() -> None:
+    """Masking BEFORE softmax must push illegal probabilities to exactly 0."""
+    logits = torch.tensor([[0.1, 5.0, -3.0, 2.0], [1.0, 1.0, 1.0, 1.0]])
+    mask = torch.tensor([[True, False, True, False], [False, True, True, True]])
+    masked = apply_action_mask(logits, mask)
+    probs = torch.softmax(masked, dim=-1)
+
+    # Illegal positions must be exactly zero in fp32 under LOGIT_MASK_VALUE=-1e9.
+    assert probs[0, 1].item() == 0.0
+    assert probs[0, 3].item() == 0.0
+    assert probs[1, 0].item() == 0.0
+
+    # Legal probabilities sum to 1.
+    torch.testing.assert_close(
+        probs.sum(dim=-1), torch.ones(2), rtol=1e-6, atol=1e-6
+    )
+
+
+def test_apply_action_mask_gradient_flow() -> None:
+    """Gradients must flow through legal logits only."""
+    logits = torch.tensor([0.5, -1.0, 2.0, 0.1], requires_grad=True)
+    mask = torch.tensor([True, False, True, False])
+    masked = apply_action_mask(logits, mask)
+    logprobs = torch.log_softmax(masked, dim=-1)
+    # Use the log-prob of a legal action.
+    loss = -logprobs[0]
+    loss.backward()  # type: ignore[no-untyped-call]
+
+    assert logits.grad is not None
+    # Legal positions receive non-zero gradient.
+    assert logits.grad[0].abs().item() > 0.0
+    assert logits.grad[2].abs().item() > 0.0
+    # Illegal positions receive ~zero gradient (up to fp32 noise from softmax).
+    assert abs(logits.grad[1].item()) < 1e-6
+    assert abs(logits.grad[3].item()) < 1e-6
+
+
+def test_apply_action_mask_shape_mismatch_raises() -> None:
+    logits = torch.zeros(4)
+    mask = torch.zeros(3, dtype=torch.bool)
+    try:
+        apply_action_mask(logits, mask)
+    except ValueError as exc:
+        assert "last dim" in str(exc)
+    else:
+        raise AssertionError("expected ValueError for mismatched last-dim")
