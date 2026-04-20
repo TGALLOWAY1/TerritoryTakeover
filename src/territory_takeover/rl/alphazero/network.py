@@ -138,15 +138,25 @@ class AlphaZeroNet(nn.Module):  # type: ignore[misc]
         # Policy head.
         self.policy_conv = nn.Conv2d(cfg.channels, 2, kernel_size=1, bias=False)
         self.policy_bn = nn.BatchNorm2d(2)
-        self.policy_fc = nn.Linear(2 * cfg.board_size * cfg.board_size, 4)
+        if cfg.head_type == "fc":
+            self.policy_fc = nn.Linear(2 * cfg.board_size * cfg.board_size, 4)
+            self.policy_pool: nn.Module = nn.Identity()
+        else:
+            self.policy_pool = nn.AdaptiveAvgPool2d(1)
+            self.policy_fc = nn.Linear(2, 4)
 
         # Value head.
         self.value_conv = nn.Conv2d(cfg.channels, 1, kernel_size=1, bias=False)
         self.value_bn = nn.BatchNorm2d(1)
-        self.value_fc1 = nn.Linear(
-            cfg.board_size * cfg.board_size + cfg.scalar_feature_dim,
-            cfg.value_hidden,
-        )
+        if cfg.head_type == "fc":
+            self.value_pool: nn.Module = nn.Identity()
+            self.value_fc1 = nn.Linear(
+                cfg.board_size * cfg.board_size + cfg.scalar_feature_dim,
+                cfg.value_hidden,
+            )
+        else:
+            self.value_pool = nn.AdaptiveAvgPool2d(1)
+            self.value_fc1 = nn.Linear(1 + cfg.scalar_feature_dim, cfg.value_hidden)
         self.value_fc2 = nn.Linear(cfg.value_hidden, cfg.value_out_dim)
 
     def forward(
@@ -173,6 +183,7 @@ class AlphaZeroNet(nn.Module):  # type: ignore[misc]
         p = self.policy_conv(x)
         p = self.policy_bn(p)
         p = torch.relu(p)
+        p = self.policy_pool(p)
         p = p.flatten(start_dim=1)
         policy_logits = self.policy_fc(p)
         policy_logits = apply_action_mask(policy_logits, action_mask)
@@ -180,6 +191,7 @@ class AlphaZeroNet(nn.Module):  # type: ignore[misc]
         v = self.value_conv(x)
         v = self.value_bn(v)
         v = torch.relu(v)
+        v = self.value_pool(v)
         v = v.flatten(start_dim=1)
         v = torch.cat([v, scalar_features], dim=1)
         v = torch.relu(self.value_fc1(v))
