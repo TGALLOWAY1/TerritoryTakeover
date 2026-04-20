@@ -25,6 +25,7 @@ from .engine import (
     reset,
     step,
 )
+from .rollout import simulate_random_rollout
 from .state import GameState, PlayerState
 
 
@@ -61,5 +62,6 @@ __all__ = [
     "compute_terminal_reward",
     "new_game",
     "reset",
+    "simulate_random_rollout",
     "step",
 ]
