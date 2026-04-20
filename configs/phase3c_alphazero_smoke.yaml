@@ -1,0 +1,34 @@
+# Phase 3c AlphaZero smoke config: tiny 6x6 / 2p, completes in seconds.
+# Used by CI and ad-hoc runs of scripts/train_alphazero.py to verify the CLI
+# wiring without burning wall-clock.
+board_size: 6
+num_players: 2
+spawn_positions: [[0, 0], [5, 5]]
+seed: 0
+device: cpu
+out_dir: results/phase3c_smoke
+
+net:
+  num_res_blocks: 1
+  channels: 8
+  value_hidden: 8
+  scalar_value_head: false
+
+train:
+  num_iterations: 2
+  games_per_iteration: 1
+  train_steps_per_iteration: 3
+  batch_size: 4
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 128
+  snapshot_every: 1
+
+self_play:
+  puct_iterations: 4
+  c_puct: 1.25
+  dirichlet_alpha: 0.3
+  dirichlet_eps: 0.25
+  temperature_moves: 4
+  max_half_moves: 12

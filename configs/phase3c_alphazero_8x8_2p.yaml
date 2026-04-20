@@ -1,0 +1,37 @@
+# Phase 3c AlphaZero baseline config: 8x8 / 2p, reduced-scope run.
+#
+# The block/channel counts are deliberately smaller than the Petosa & Balch
+# reference (10 blocks / 128 channels) so the smoke run completes within a
+# single-hour CPU budget. Full ablations (10-vs-20 blocks, 64/128/256 channels)
+# are deferred — see docs/phase3c/*.
+board_size: 8
+num_players: 2
+spawn_positions: [[0, 0], [7, 7]]
+seed: 0
+device: cpu
+out_dir: results/phase3c
+
+net:
+  num_res_blocks: 4
+  channels: 64
+  value_hidden: 64
+  scalar_value_head: false
+
+train:
+  num_iterations: 50
+  games_per_iteration: 10
+  train_steps_per_iteration: 100
+  batch_size: 64
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 50000
+  snapshot_every: 10
+
+self_play:
+  puct_iterations: 32
+  c_puct: 1.25
+  dirichlet_alpha: 0.3
+  dirichlet_eps: 0.25
+  temperature_moves: 16
+  max_half_moves: 256

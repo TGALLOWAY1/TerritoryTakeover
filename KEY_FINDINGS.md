@@ -212,3 +212,135 @@ Both are well above the 0.25 uniform baseline — the agent does learn
 - TensorBoard event files are emitted under `results/phase3a/runs/<stamp>/tb/`
   if `tensorboardX` is installed. Not needed for this writeup — CSVs are
   sufficient.
+
+---
+
+## Phase 3c — AlphaZero primitives (infrastructure only) (2026-04-20)
+
+**Status.** Infrastructure landed; long-running training and the full
+evaluation table are deferred. This entry exists so the deferral is
+visible in the lab notebook rather than buried in a commit message.
+
+**Goal.** Stand up a Petosa & Balch (2019)-style AlphaZero agent for
+TerritoryTakeover: PUCT MCTS driven by a ResNet policy/value network
+with a per-seat value head (one expected normalized score per seat, not
+a single scalar). Per-seat values are the named design choice that
+generalizes AlphaZero to multi-seat self-play games.
+
+**Branch.** `claude/complete-key-findings-phase-3b-c4tFV` (name is
+stale — this is Phase 3c work; carried over from the earlier Phase 3b
+branch).
+
+### What shipped
+
+All pieces live under `src/territory_takeover/rl/alphazero/`:
+
+- `spaces.py` — `encode_az_observation(state, active_player)` returns
+  `(grid_planes (3N+2, H, W), scalars (3+N,))`. Unlike the PPO encoder
+  this uses **fixed seat ordering** (plane `i` is always seat `i`'s
+  path/claim) and appends an N-channel turn one-hot so the network can
+  read whose turn it is directly — both required for a stable per-seat
+  value head.
+- `network.py` — `AlphaZeroNet(AZNetConfig)`: conv stem → configurable
+  ResNet trunk (`num_res_blocks`, `channels`) → policy head (1×1 conv +
+  flatten + linear → 4 logits, illegal slots already masked) → value
+  head (1×1 conv + flatten concat scalars + linear + ReLU + linear +
+  tanh → `(N,)` in `[-1, 1]`). Scalar-value-head ablation path is
+  exposed as `scalar_value_head=True` but not yet executed.
+- `evaluator.py` — `NNEvaluator` with OrderedDict-based LRU cache keyed
+  on `(grid.tobytes(), active_player, tuple(head_positions))`,
+  batched-inference API, and virtual-loss scaffolding for future
+  concurrent search. Priors are legal-action-masked softmax; illegal
+  slots are returned as exactly zero.
+- `mcts.py` — `puct_search(state, root_player, evaluator, iterations,
+  c_puct=1.25, dirichlet_alpha=0.3, dirichlet_eps=0.25, rng, temperature)`.
+  Reuses the passive `search.mcts.node.MCTSNode` (which already carries
+  a per-player `total_value` vector), stores priors in a per-call
+  side table keyed by `id(node)`, applies Dirichlet noise **at the root
+  only** on the first expansion, and backs up the full per-seat value
+  vector at each level. Ships an `AlphaZeroAgent` wrapper that satisfies
+  the `search.agent.Agent` protocol.
+- `replay.py` — Fixed-capacity numpy ring buffer over
+  `(grid, scalars, mask, visits, final_scores)`. O(1) `add`, uniform
+  `sample`, single-`.npz` save/load.
+- `selfplay.py` — `play_game(evaluator, cfg, rng)` drives every seat
+  with an independent PUCT search, follows AlphaGo Zero's canonical
+  temperature schedule (sample ∝ visits for the first
+  `temperature_moves` half-moves, argmax after), and emits one `Sample`
+  per visited state with the same per-seat final value vector.
+- `train.py` — `train_step(net, opt, batch)` = masked softmax
+  cross-entropy (policy) + MSE (value) + L2. `train_loop(net_cfg,
+  train_cfg, self_play_cfg, out_dir)` iterates self-play → buffer → SGD
+  → snapshot and writes `iteration_log.csv`. **Gating tournament is
+  stubbed** with a `# TODO` — under the reduced-scope cadence the latest
+  snapshot always drives self-play.
+- `scripts/train_alphazero.py` + `scripts/eval_alphazero.py` — YAML-driven
+  CLI shims. Configs under `configs/phase3c_alphazero_*.yaml`.
+
+Tests are under `tests/test_rl_alphazero_*.py` (six files, 39 tests):
+encoder invariants, forward-pass shapes, cache/LRU/virtual-loss
+semantics, PUCT formula on a toy node, per-seat backup, temperature
+schedule, replay round-trip, and a 2-iteration end-to-end smoke that
+writes snapshots and `iteration_log.csv`. All 39 pass.
+
+### What did **not** ship (explicit deferrals)
+
+The original Phase 3c prompt called for a multi-hour self-play run, a
+full evaluation table vs Random / Greedy / UCT-32 / Phase 3b PPO, a
+gating-tournament promotion policy, a 4-dim-vs-scalar value-head
+ablation, and 10-vs-20-block / 64-vs-128-vs-256-channel network-size
+ablations. Under the single-pass wall-clock budget none of those fit; in
+priority order:
+
+1. **No trained checkpoint.** The 50-iteration 8×8/2p baseline
+   (`configs/phase3c_alphazero_8x8_2p.yaml`) is wired but not yet
+   executed. Without a checkpoint there is no Headline result, no
+   training curves, and no win-rate table. The smoke config
+   (`configs/phase3c_alphazero_smoke.yaml`) does complete in seconds
+   and confirms the loss decreases iteration-over-iteration (1.49 →
+   1.27 on a 6×6 / 2p run), but that's a plumbing check, not evidence
+   of learning.
+2. **No PPO comparison.** Phase 3b shipped primitives only — there is
+   no trained PPO checkpoint in the repo. The prompt's "AlphaZero must
+   exceed PPO" acceptance is moot until Phase 3b trains a model.
+3. **Gating tournament.** The stub in `train.py` always promotes the
+   latest network. A proper implementation would play the current
+   network vs the reigning champion and only promote on a threshold
+   (e.g. ≥55% over N games, per the AlphaGo Zero convention).
+4. **4-dim-vs-scalar value-head ablation.** The `scalar_value_head`
+   flag exists and is tested on forward shapes, but the two runs needed
+   to compare head variants have not been executed.
+5. **Network-size ablation.** No comparison at all between 10-vs-20
+   blocks or 64/128/256 channels. The default config uses 4 blocks /
+   64 channels for CPU budget reasons.
+6. **Strategic-behavior vignettes.** No alliance / double-enclosure /
+   end-game probing examples.
+
+### Repro checklist
+
+- Install: `pip install -e ".[rl_deep,dev]"` (pulls in `torch`).
+- Unit tests: `python -m pytest tests/test_rl_alphazero_*.py -q`.
+- Smoke train (seconds, 6×6 / 2p, 1 res block, 8 channels):
+  `python scripts/train_alphazero.py --config configs/phase3c_alphazero_smoke.yaml`.
+- Baseline train (not yet executed; reduced-scope ~1 hr CPU budget,
+  8×8 / 2p, 4 res blocks, 64 channels):
+  `python scripts/train_alphazero.py --config configs/phase3c_alphazero_8x8_2p.yaml --seed 0`.
+- Eval a checkpoint:
+  `python scripts/eval_alphazero.py --checkpoint results/phase3c/runs/<stamp>/net_final.pt --config configs/phase3c_alphazero_8x8_2p.yaml --games 200`.
+
+### Follow-ups
+
+In priority order for the next session:
+
+1. Execute the 8×8 / 2p baseline run end-to-end and populate this entry
+   with the Headline result table (win rates + Wilson 95% CIs vs Random
+   / Greedy / UCT-32) and training curves under `docs/phase3c/`.
+2. Implement the gating tournament promotion policy in `train.py`,
+   replacing the always-promote stub.
+3. Train a Phase 3b PPO baseline so the "AlphaZero exceeds PPO"
+   acceptance criterion can be tested.
+4. Run the 4-dim-vs-scalar value-head ablation — the prompt's named
+   "core research question" — using matched configs.
+5. Network-size ablation (blocks and channels) once the baseline run's
+   wall-clock is measured so ablation runs can be budgeted.
+
