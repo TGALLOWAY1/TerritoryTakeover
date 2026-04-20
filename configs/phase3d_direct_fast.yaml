@@ -1,0 +1,35 @@
+# Phase 3d direct-training control (fast-ablation scope).
+#
+# Matched-budget sibling of phase3d_curriculum_fast.yaml.
+# Total self-play steps: 1600 (same as the three curriculum stages).
+
+net:
+  num_res_blocks: 2
+  channels: 32
+  value_hidden: 32
+  head_type: conv
+
+train:
+  batch_size: 32
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 10000
+  eval_games_per_check: 8
+  iterations_per_eval: 1
+
+curriculum:
+  stages:
+    - name: direct_10x10_2p
+      board_size: 10
+      num_players: 2
+      puct_iterations: 8
+      games_per_iteration: 4
+      train_steps_per_iteration: 40
+      temperature_moves: 10
+      max_half_moves: 160
+      promotion:
+        max_self_play_steps: 1600
+        elo_gain_window: 3
+        elo_gain_threshold: 8.0
+        min_evaluations: 3
