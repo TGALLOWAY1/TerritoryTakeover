@@ -1,4 +1,4 @@
-"""PPO primitives: rollout buffer and Generalized Advantage Estimation.
+"""PPO primitives: rollout buffer, GAE, and the clipped update step.
 
 Adapted from CleanRL's reference implementation
 (https://github.com/vwxyzjn/cleanrl/blob/master/cleanrl/ppo.py). The math
@@ -6,12 +6,13 @@ and the minibatch loop structure follow that file directly; deviations:
 
 - Observations are two tensors (grid, scalars) plus an action mask instead of
   a single flat vector, because the network in :mod:`.network` reads both.
-- The buffer stores the action mask alongside each transition so the update
-  step can re-apply :func:`.spaces.apply_action_mask` and never trust stale
-  logits.
+- The update step enforces logit-level action masking via
+  :func:`.spaces.apply_action_mask` (applied inside the network forward) so
+  stale logits from the rollout are never trusted — masks are re-applied
+  from stored legal actions each minibatch.
 
-The clipped-surrogate update step and the training loop itself live in
-sibling modules landing in follow-up commits.
+The training loop itself (env stepping, opponent pool, logging) lives in
+``train.py`` which is a later-session deliverable.
 """
 
 from __future__ import annotations
@@ -21,9 +22,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from torch import nn
+from torch.nn import functional as F  # noqa: N812 — standard torch alias
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from .network import ActorCritic
 
 
 @dataclass(slots=True)
@@ -233,8 +238,86 @@ def compute_gae(
     return advantages, returns
 
 
+@dataclass(slots=True)
+class PpoConfig:
+    """Hyperparameters for :func:`ppo_update`.
+
+    Defaults track the task prompt: clip=0.2, 4 epochs per rollout (looped by
+    caller), minibatch 256. Learning rate is owned by the optimizer.
+    """
+
+    clip_eps: float = 0.2
+    value_coef: float = 0.5
+    entropy_coef: float = 0.01
+    max_grad_norm: float = 0.5
+    normalize_advantages: bool = True
+    clip_value_loss: bool = True
+
+
+def ppo_update(
+    network: ActorCritic,
+    optimizer: torch.optim.Optimizer,
+    batch: RolloutBatch,
+    cfg: PpoConfig,
+) -> dict[str, float]:
+    """One SGD step of the clipped PPO objective on ``batch``.
+
+    Returns a dict of scalar loss diagnostics (policy/value/entropy/kl/
+    clip_frac) suitable for tensorboard. The function calls ``backward`` on
+    the combined loss and ``optimizer.step``; callers own epoch / minibatch
+    looping and LR scheduling.
+    """
+    dist, new_values = network(batch.grid, batch.scalars, batch.mask)
+    new_logprobs = dist.log_prob(batch.actions)
+    entropy = dist.entropy().mean()
+
+    advantages = batch.advantages
+    if cfg.normalize_advantages:
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    # Clipped policy loss (surrogate objective), per CleanRL.
+    log_ratio = new_logprobs - batch.logprobs
+    ratio = log_ratio.exp()
+    pg_loss1 = -advantages * ratio
+    pg_loss2 = -advantages * torch.clamp(ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps)
+    policy_loss = torch.max(pg_loss1, pg_loss2).mean()
+
+    # Value loss with optional CleanRL-style clipping around the old value.
+    if cfg.clip_value_loss:
+        v_clipped = batch.values + torch.clamp(
+            new_values - batch.values, -cfg.clip_eps, cfg.clip_eps
+        )
+        v_loss_unclipped = (new_values - batch.returns).pow(2)
+        v_loss_clipped = (v_clipped - batch.returns).pow(2)
+        value_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+    else:
+        value_loss = 0.5 * F.mse_loss(new_values, batch.returns)
+
+    loss = policy_loss - cfg.entropy_coef * entropy + cfg.value_coef * value_loss
+
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    nn.utils.clip_grad_norm_(network.parameters(), cfg.max_grad_norm)
+    optimizer.step()
+
+    with torch.no_grad():
+        approx_kl = ((ratio - 1) - log_ratio).mean().item()
+        clip_frac = ((ratio - 1).abs() > cfg.clip_eps).float().mean().item()
+
+    return {
+        "loss": float(loss.detach().item()),
+        "policy_loss": float(policy_loss.detach().item()),
+        "value_loss": float(value_loss.detach().item()),
+        "entropy": float(entropy.detach().item()),
+        "approx_kl": float(approx_kl),
+        "clip_frac": float(clip_frac),
+    }
+
+
 __all__ = [
+    "PpoConfig",
     "RolloutBatch",
     "RolloutBuffer",
     "compute_gae",
+    "ppo_update",
 ]

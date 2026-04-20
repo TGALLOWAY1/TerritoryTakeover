@@ -1,13 +1,17 @@
-"""Tests for PPO primitives: rollout buffer, GAE."""
+"""Tests for PPO primitives: rollout buffer, GAE, and update step."""
 
 from __future__ import annotations
 
 import numpy as np
 import torch
 
+from territory_takeover.rl.ppo.network import ActorCritic, PpoNetConfig
 from territory_takeover.rl.ppo.ppo_core import (
+    PpoConfig,
+    RolloutBatch,
     RolloutBuffer,
     compute_gae,
+    ppo_update,
 )
 
 
@@ -219,3 +223,137 @@ def test_compute_gae_shape_validation() -> None:
         assert "bootstrap_value" in str(exc)
     else:
         raise AssertionError("expected ValueError on bootstrap shape")
+
+
+def _synthetic_batch(
+    net_cfg: PpoNetConfig, batch_size: int, *, positive_advantage: bool
+) -> RolloutBatch:
+    """Build a deterministic RolloutBatch for PPO update tests.
+
+    Advantages are all positive (or all negative) for a specific action so we
+    can predict loss motion: a positive-advantage update should increase the
+    log-prob of the chosen action and thus decrease policy loss over epochs.
+    """
+    c = net_cfg.grid_in_channels
+    h = w = net_cfg.board_size
+    s = net_cfg.scalar_feature_dim
+    grid = torch.zeros(batch_size, c, h, w)
+    scalars = torch.zeros(batch_size, s)
+    mask = torch.ones(batch_size, 4, dtype=torch.bool)
+    actions = torch.zeros(batch_size, dtype=torch.long)
+    # Old logprobs at log(1/4) = -log(4) for a uniform policy.
+    logprobs = torch.full((batch_size,), -float(np.log(4)))
+    adv_sign = 1.0 if positive_advantage else -1.0
+    advantages = torch.full((batch_size,), adv_sign)
+    returns = torch.ones(batch_size) * 0.5
+    values = torch.zeros(batch_size)
+    return RolloutBatch(
+        grid=grid,
+        scalars=scalars,
+        mask=mask,
+        actions=actions,
+        logprobs=logprobs,
+        advantages=advantages,
+        returns=returns,
+        values=values,
+    )
+
+
+def test_ppo_update_returns_diagnostic_dict() -> None:
+    torch.manual_seed(0)
+    net_cfg = PpoNetConfig(board_size=6, num_players=2)
+    net = ActorCritic(net_cfg)
+    opt = torch.optim.Adam(net.parameters(), lr=3e-4)
+    batch = _synthetic_batch(net_cfg, batch_size=16, positive_advantage=True)
+    stats = ppo_update(net, opt, batch, PpoConfig())
+    expected_keys = {
+        "loss",
+        "policy_loss",
+        "value_loss",
+        "entropy",
+        "approx_kl",
+        "clip_frac",
+    }
+    assert set(stats.keys()) == expected_keys
+    for v in stats.values():
+        assert np.isfinite(v), stats
+
+
+def test_ppo_update_reduces_policy_loss_on_positive_advantage() -> None:
+    """50 updates on a fixed positive-advantage batch should drive policy_loss down."""
+    torch.manual_seed(0)
+    net_cfg = PpoNetConfig(board_size=6, num_players=2)
+    net = ActorCritic(net_cfg)
+    opt = torch.optim.Adam(net.parameters(), lr=3e-4)
+    batch = _synthetic_batch(net_cfg, batch_size=32, positive_advantage=True)
+
+    first_stats = ppo_update(net, opt, batch, PpoConfig(normalize_advantages=False))
+    for _ in range(49):
+        stats = ppo_update(net, opt, batch, PpoConfig(normalize_advantages=False))
+    last_stats = stats
+
+    # Policy loss should be strictly lower after optimization; the chosen
+    # action's advantage is positive so its log-prob must rise.
+    assert last_stats["policy_loss"] < first_stats["policy_loss"], (
+        first_stats,
+        last_stats,
+    )
+
+
+def test_ppo_update_respects_clip_epsilon() -> None:
+    """When ratio exits the [1-eps, 1+eps] band, clip_frac should be > 0."""
+    torch.manual_seed(0)
+    net_cfg = PpoNetConfig(board_size=6, num_players=2)
+    net = ActorCritic(net_cfg)
+    opt = torch.optim.Adam(net.parameters(), lr=1e-2)  # aggressive LR to trip clip
+    batch = _synthetic_batch(net_cfg, batch_size=32, positive_advantage=True)
+
+    saw_clipping = False
+    for _ in range(30):
+        stats = ppo_update(net, opt, batch, PpoConfig(clip_eps=0.1))
+        if stats["clip_frac"] > 0.0:
+            saw_clipping = True
+            break
+    assert saw_clipping, "clip_frac never triggered despite aggressive LR"
+
+
+def test_ppo_update_grad_norm_clipping_keeps_grads_finite() -> None:
+    """Even with a huge advantage, max_grad_norm should keep training stable."""
+    torch.manual_seed(0)
+    net_cfg = PpoNetConfig(board_size=6, num_players=2)
+    net = ActorCritic(net_cfg)
+    opt = torch.optim.Adam(net.parameters(), lr=1.0)
+    batch = _synthetic_batch(net_cfg, batch_size=8, positive_advantage=True)
+    # Inflate the advantage.
+    batch.advantages.mul_(1e4)
+
+    stats = ppo_update(net, opt, batch, PpoConfig(max_grad_norm=0.5))
+    assert np.isfinite(stats["loss"])
+    for p in net.parameters():
+        assert torch.isfinite(p.data).all(), "parameters exploded despite clipping"
+
+
+def test_ppo_update_preserves_legal_mask_during_loss() -> None:
+    """Illegal actions in the mask must produce very negative new logprobs."""
+    torch.manual_seed(0)
+    net_cfg = PpoNetConfig(board_size=6, num_players=2)
+    net = ActorCritic(net_cfg)
+    # Force the batch action to be legal (action 0) and mask-out others.
+    c = net_cfg.grid_in_channels
+    h = w = net_cfg.board_size
+    s = net_cfg.scalar_feature_dim
+    batch = RolloutBatch(
+        grid=torch.zeros(4, c, h, w),
+        scalars=torch.zeros(4, s),
+        mask=torch.tensor([[True, False, False, False]] * 4),
+        actions=torch.zeros(4, dtype=torch.long),
+        logprobs=torch.zeros(4),  # log(1) under a hard-masked policy
+        advantages=torch.ones(4),
+        returns=torch.zeros(4),
+        values=torch.zeros(4),
+    )
+    opt = torch.optim.Adam(net.parameters(), lr=3e-4)
+    stats = ppo_update(net, opt, batch, PpoConfig())
+    # Entropy of a single-legal-action distribution is 0; small positive from
+    # numerical error tolerated.
+    assert stats["entropy"] < 1e-3
