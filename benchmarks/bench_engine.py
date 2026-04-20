@@ -26,7 +26,7 @@ import numpy as np
 
 from territory_takeover import GameState, new_game, step
 from territory_takeover.actions import legal_actions
-from territory_takeover.constants import PATH_CODES
+from territory_takeover.constants import DIRECTIONS, PATH_CODES
 
 BENCH_DIR = Path(__file__).resolve().parent
 
@@ -43,12 +43,21 @@ class TimingResult:
     iters: int
     target_us: float | None = None
     extra: dict[str, float] | None = None
+    p50_us: float | None = None
+    p90_us: float | None = None
+    p99_us: float | None = None
 
     @property
     def passed(self) -> bool:
         if self.target_us is None:
             return True
         return self.min_us < self.target_us
+
+
+def _percentiles_us(samples: np.ndarray) -> tuple[float, float, float]:
+    """Return (p50, p90, p99) in µs from an int64 nanosecond sample array."""
+    p50, p90, p99 = np.percentile(samples, [50, 90, 99])
+    return float(p50) / 1000.0, float(p90) / 1000.0, float(p99) / 1000.0
 
 
 def _time_callable(
@@ -69,6 +78,7 @@ def _time_callable(
     min_us = float(samples.min()) / 1000.0
     median_us = float(np.median(samples)) / 1000.0
     mean_us = float(samples.mean()) / 1000.0
+    p50, p90, p99 = _percentiles_us(samples)
     return TimingResult(
         name=name,
         min_us=min_us,
@@ -76,6 +86,9 @@ def _time_callable(
         mean_us=mean_us,
         iters=iters,
         target_us=target_us,
+        p50_us=p50,
+        p90_us=p90,
+        p99_us=p99,
     )
 
 
@@ -270,38 +283,64 @@ def bench_step_with_enclosure(iters: int) -> TimingResult:
     )
 
 
-def bench_full_game_random(iters: int) -> TimingResult:
-    """Full random game on 40x40 — report per-game milliseconds."""
+def bench_full_game_random(iters: int, board_size: int = 40) -> TimingResult:
+    """Full random game — report per-game milliseconds and turn stats.
+
+    `board_size` is parametrized so the harness can scale across 20/30/40.
+    The per-call target scales with area (O(cells) worst-case BFS).
+    """
+    target_us = float(50_000 * (board_size / 40) ** 2)
+
     # warmup
     for _ in range(3):
         rng = random.Random(0)
-        _play_random_game(new_game(board_size=40, num_players=4, seed=0), rng)
+        _play_random_game(new_game(board_size=board_size, num_players=4, seed=0), rng)
 
     samples = np.empty(iters, dtype=np.int64)
+    turns_arr = np.empty(iters, dtype=np.int64)
     for i in range(iters):
         rng = random.Random(i)
-        state = new_game(board_size=40, num_players=4, seed=i)
+        state = new_game(board_size=board_size, num_players=4, seed=i)
         t0 = time.perf_counter_ns()
-        _play_random_game(state, rng)
+        turns = _play_random_game(state, rng)
         samples[i] = time.perf_counter_ns() - t0
+        turns_arr[i] = turns
+
+    p50, p90, p99 = _percentiles_us(samples)
+    mean_turns = float(turns_arr.mean())
+    total_elapsed_s = float(samples.sum()) / 1e9
+    total_turns = int(turns_arr.sum())
+    turns_per_sec = total_turns / total_elapsed_s if total_elapsed_s > 0 else 0.0
 
     return TimingResult(
-        name="bench_full_game_random",
+        name=f"bench_full_game_random_{board_size}",
         min_us=float(samples.min()) / 1000.0,
         median_us=float(np.median(samples)) / 1000.0,
         mean_us=float(samples.mean()) / 1000.0,
         iters=iters,
-        target_us=50_000.0,  # 50 ms
+        target_us=target_us,
+        p50_us=p50,
+        p90_us=p90,
+        p99_us=p99,
+        extra={
+            "board_size": float(board_size),
+            "mean_turns_per_game": mean_turns,
+            "turns_per_sec": turns_per_sec,
+            "games_per_min": 60.0 * iters / total_elapsed_s if total_elapsed_s > 0 else 0.0,
+        },
     )
 
 
-def bench_rollout_throughput(iters: int) -> TimingResult:
+def bench_rollout_throughput(iters: int, board_size: int = 40) -> TimingResult:
     """Rollouts (copy mid-game state, play to completion) — games per second.
 
     This is the MCTS-relevant op. We report games/sec as the primary metric
     in ``extra``; ``min/median/mean_us`` are per-rollout times for context.
+    Scaled across board sizes via `board_size`.
     """
-    base = _make_midgame_state(plies=100, seed=42)
+    # Scale plies with board area so mid-game states are comparable across sizes.
+    plies = int(100 * (board_size / 40) ** 2)
+    base = _make_midgame_state(board_size=board_size, plies=plies, seed=42)
 
     # warmup
     for _ in range(5):
@@ -319,17 +358,114 @@ def bench_rollout_throughput(iters: int) -> TimingResult:
     total_elapsed_s = (time.perf_counter_ns() - total_t0) / 1e9
     games_per_sec = iters / total_elapsed_s
 
+    p50, p90, p99 = _percentiles_us(samples)
+
     return TimingResult(
-        name="bench_rollout_throughput",
+        name=f"bench_rollout_throughput_{board_size}",
         min_us=float(samples.min()) / 1000.0,
         median_us=float(np.median(samples)) / 1000.0,
         mean_us=float(samples.mean()) / 1000.0,
         iters=iters,
         target_us=None,
+        p50_us=p50,
+        p90_us=p90,
+        p99_us=p99,
         extra={
+            "board_size": float(board_size),
             "games_per_sec": games_per_sec,
+            "games_per_min": games_per_sec * 60.0,
             "target_games_per_sec": 1000.0,
-            "games_per_sec_pass": games_per_sec >= 1000.0,
+            "games_per_sec_pass": float(games_per_sec >= 1000.0),
+        },
+    )
+
+
+def bench_trigger_fire_rate(
+    games: int = 50,
+    board_size: int = 40,
+    num_players: int = 4,
+    seed_base: int = 1000,
+) -> TimingResult:
+    """Diagnostic: measure how often the enclosure trigger fires vs actually claims.
+
+    The current engine runs a full-board boundary BFS every time the cheap
+    trigger predicate fires (placed_cell adjacent to a same-player path tile
+    other than its predecessor). On random play the trigger over-approximates
+    — many fires produce 0 claimed cells — which is the core wasted-work
+    hypothesis the optimization plan addresses.
+
+    Reported via ``extra``:
+      - trigger_fires: total fires summed across games
+      - enclosures:    fires that claimed >= 1 cell
+      - wasted_fires:  fires that claimed 0 cells (full BFS for nothing)
+      - wasted_rate:   wasted_fires / trigger_fires
+      - steps:         total step() calls
+    """
+    trigger_fires = 0
+    enclosures = 0
+    steps_total = 0
+    wall_ns = 0
+
+    for g in range(games):
+        state = new_game(board_size=board_size, num_players=num_players, seed=seed_base + g)
+        rng = random.Random(seed_base + g)
+        t0 = time.perf_counter_ns()
+        while not state.done:
+            pid = state.current_player
+            acts = legal_actions(state, pid)
+            if not acts:
+                step(state, 0)  # advances/marks dead
+                steps_total += 1
+                continue
+
+            # Replicate the trigger-fire check around the step call so we can
+            # attribute before/after. This is diagnostic only; overhead is fine.
+            r, c = state.players[pid].head
+            chosen = rng.choice(acts)
+            dr, dc = DIRECTIONS[chosen]
+            target = (r + dr, c + dc)
+            # Would-be predecessor is the current head, not the placed target.
+            predecessor = (r, c)
+            fires = False
+            p = state.players[pid]
+            pset = p.path_set
+            tr, tc = target
+            for ddr, ddc in DIRECTIONS:
+                nbr = (tr + ddr, tc + ddc)
+                if nbr == predecessor:
+                    continue
+                if nbr in pset:
+                    fires = True
+                    break
+
+            result = step(state, chosen)
+            steps_total += 1
+            if fires:
+                trigger_fires += 1
+                if result.info["claimed_this_turn"] > 0:
+                    enclosures += 1
+        wall_ns += time.perf_counter_ns() - t0
+
+    wasted = trigger_fires - enclosures
+    wasted_rate = (wasted / trigger_fires) if trigger_fires else 0.0
+    elapsed_s = wall_ns / 1e9
+
+    return TimingResult(
+        name=f"bench_trigger_fire_rate_{board_size}",
+        min_us=0.0,
+        median_us=0.0,
+        mean_us=0.0,
+        iters=games,
+        target_us=None,
+        extra={
+            "board_size": float(board_size),
+            "num_players": float(num_players),
+            "steps": float(steps_total),
+            "trigger_fires": float(trigger_fires),
+            "enclosures": float(enclosures),
+            "wasted_fires": float(wasted),
+            "wasted_rate": float(wasted_rate),
+            "wall_s": elapsed_s,
         },
     )
 
@@ -346,29 +482,71 @@ def _format_us(us: float) -> str:
 def _print_table(results: list[TimingResult]) -> None:
     print()
     print(
-        f"{'Benchmark':<30}{'Min':>14}{'Median':>14}{'Mean':>14}"
-        f"{'Target':>14}{'Pass?':>8}"
+        f"{'Benchmark':<34}{'Min':>12}{'p50':>12}{'p90':>12}{'p99':>12}"
+        f"{'Mean':>12}{'Target':>14}{'Pass?':>8}"
     )
-    print("-" * 94)
+    print("-" * 116)
     for r in results:
-        if r.name == "bench_rollout_throughput":
+        if r.name.startswith("bench_trigger_fire_rate"):
+            assert r.extra is not None
+            print(
+                f"{r.name:<34}{'—':>12}{'—':>12}{'—':>12}{'—':>12}{'—':>12}"
+                f"{'n/a':>14}{'INFO':>8}"
+            )
+            steps = int(r.extra["steps"])
+            fires = int(r.extra["trigger_fires"])
+            encs = int(r.extra["enclosures"])
+            wasted = int(r.extra["wasted_fires"])
+            wasted_rate = r.extra["wasted_rate"]
+            print(
+                f"{'  → steps/fires/enclosures':<34}"
+                f"{steps:>12}{fires:>12}{encs:>12}{wasted:>12}"
+                f"{f'{wasted_rate * 100:.1f}%':>12}"
+                f"{'wasted':>14}"
+            )
+            continue
+        if r.name.startswith("bench_rollout_throughput"):
             assert r.extra is not None
             gps = r.extra["games_per_sec"]
             target = r.extra["target_games_per_sec"]
             passed = gps >= target
+            p50 = r.p50_us if r.p50_us is not None else r.median_us
+            p90 = r.p90_us if r.p90_us is not None else r.median_us
+            p99 = r.p99_us if r.p99_us is not None else r.median_us
             print(
-                f"{r.name:<30}{_format_us(r.min_us):>14}{_format_us(r.median_us):>14}"
-                f"{_format_us(r.mean_us):>14}"
+                f"{r.name:<34}"
+                f"{_format_us(r.min_us):>12}"
+                f"{_format_us(p50):>12}"
+                f"{_format_us(p90):>12}"
+                f"{_format_us(p99):>12}"
+                f"{_format_us(r.mean_us):>12}"
                 f"{f'>= {target:.0f} g/s':>14}"
                 f"{'PASS' if passed else 'FAIL':>8}"
             )
-            print(f"{'  → throughput':<30}{gps:>14.1f} games/sec")
-        else:
-            target_str = f"< {r.target_us:.0f} µs" if r.target_us else "n/a"
+            print(f"{'  → throughput':<34}{gps:>12.1f} g/s  ({gps * 60:.0f} g/min)")
+            continue
+
+        target_str = f"< {r.target_us:.0f} µs" if r.target_us else "n/a"
+        p50 = r.p50_us if r.p50_us is not None else r.median_us
+        p90 = r.p90_us if r.p90_us is not None else r.median_us
+        p99 = r.p99_us if r.p99_us is not None else r.median_us
+        print(
+            f"{r.name:<34}"
+            f"{_format_us(r.min_us):>12}"
+            f"{_format_us(p50):>12}"
+            f"{_format_us(p90):>12}"
+            f"{_format_us(p99):>12}"
+            f"{_format_us(r.mean_us):>12}"
+            f"{target_str:>14}"
+            f"{'PASS' if r.passed else 'FAIL':>8}"
+        )
+        if r.extra and "mean_turns_per_game" in r.extra:
+            mt = r.extra["mean_turns_per_game"]
+            tps = r.extra["turns_per_sec"]
+            gpm = r.extra["games_per_min"]
             print(
-                f"{r.name:<30}{_format_us(r.min_us):>14}{_format_us(r.median_us):>14}"
-                f"{_format_us(r.mean_us):>14}{target_str:>14}"
-                f"{'PASS' if r.passed else 'FAIL':>8}"
+                f"{'  → turns/game / turns-per-sec / games-per-min':<34}"
+                f"{mt:>12.1f}{tps:>12.0f}{gpm:>12.0f}"
             )
     print()
 
@@ -380,6 +558,9 @@ def _results_to_json(results: list[TimingResult]) -> dict[str, Any]:
             "min_us": r.min_us,
             "median_us": r.median_us,
             "mean_us": r.mean_us,
+            "p50_us": r.p50_us,
+            "p90_us": r.p90_us,
+            "p99_us": r.p99_us,
             "iters": r.iters,
             "target_us": r.target_us,
             "pass": r.passed,
@@ -501,9 +682,33 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--no-save", action="store_true", help="Don't write baseline/hotspots")
     parser.add_argument("--quick", action="store_true", help="10x fewer iterations")
+    parser.add_argument(
+        "--board-sizes",
+        type=str,
+        default="20,30,40",
+        help="Comma-separated board sizes for scaling benches (default 20,30,40).",
+    )
+    parser.add_argument(
+        "--out",
+        type=str,
+        default="baseline.json",
+        help="Output JSON filename under benchmarks/ (default baseline.json).",
+    )
+    parser.add_argument(
+        "--hotspots-out",
+        type=str,
+        default="HOTSPOTS.md",
+        help="Output markdown filename under benchmarks/ (default HOTSPOTS.md).",
+    )
+    parser.add_argument(
+        "--skip-profile",
+        action="store_true",
+        help="Skip the cProfile pass that regenerates HOTSPOTS.md.",
+    )
     args = parser.parse_args()
 
     scale = 0.1 if args.quick else 1.0
+    board_sizes = [int(x) for x in args.board_sizes.split(",") if x.strip()]
 
     def s(n: int) -> int:
         return max(10, int(n * scale))
@@ -511,19 +716,28 @@ def main() -> int:
     print("Running TerritoryTakeover engine benchmarks...")
     print(f"  python: {sys.version.split()[0]}")
     print(f"  numpy:  {np.__version__}")
+    print(f"  board_sizes: {board_sizes}")
 
-    results = [
+    results: list[TimingResult] = [
         bench_state_copy(iters=s(10_000)),
         bench_legal_actions(iters=s(200_000)),
         bench_step_no_enclosure(iters=s(50_000)),
         bench_step_with_enclosure(iters=s(5_000)),
-        bench_full_game_random(iters=s(200)),
-        bench_rollout_throughput(iters=s(500)),
     ]
+    # Scale the per-game game/rollout iter counts with area so wall-clock stays
+    # roughly balanced across board sizes.
+    for bs in board_sizes:
+        area_factor = (bs / 40) ** 2  # 20→0.25, 30→0.56, 40→1.0
+        game_iters = max(30, int(s(200) / max(area_factor, 0.25)))
+        rollout_iters = max(50, int(s(500) / max(area_factor, 0.25)))
+        results.append(bench_full_game_random(iters=game_iters, board_size=bs))
+        results.append(bench_rollout_throughput(iters=rollout_iters, board_size=bs))
+        results.append(bench_trigger_fire_rate(games=max(10, s(50)), board_size=bs))
+
     _print_table(results)
 
     if args.no_save:
-        print("(--no-save: skipping baseline.json and HOTSPOTS.md)")
+        print("(--no-save: skipping JSON and HOTSPOTS.md)")
         return 0
 
     baseline = {
@@ -532,17 +746,21 @@ def main() -> int:
         "numpy": np.__version__,
         "platform": sys.platform,
         "quick_mode": args.quick,
+        "board_sizes": board_sizes,
         "results": _results_to_json(results),
     }
-    (BENCH_DIR / "baseline.json").write_text(json.dumps(baseline, indent=2) + "\n")
-    print(f"Wrote {BENCH_DIR / 'baseline.json'}")
+    (BENCH_DIR / args.out).write_text(json.dumps(baseline, indent=2) + "\n")
+    print(f"Wrote {BENCH_DIR / args.out}")
 
-    # cProfile sized to ~1-2s of rollout CPU.
-    profile_games = max(50, int(200 * scale))
-    print(f"Profiling {profile_games} rollouts for HOTSPOTS.md...")
-    stats = _profile_rollouts(profile_games)
-    _write_hotspots(stats, BENCH_DIR / "HOTSPOTS.md", games=profile_games)
-    print(f"Wrote {BENCH_DIR / 'HOTSPOTS.md'}")
+    if args.skip_profile:
+        print("(--skip-profile: skipping HOTSPOTS.md)")
+    else:
+        # cProfile sized to ~1-2s of rollout CPU.
+        profile_games = max(50, int(200 * scale))
+        print(f"Profiling {profile_games} rollouts for {args.hotspots_out}...")
+        stats = _profile_rollouts(profile_games)
+        _write_hotspots(stats, BENCH_DIR / args.hotspots_out, games=profile_games)
+        print(f"Wrote {BENCH_DIR / args.hotspots_out}")
 
     # Exit nonzero if any hard-target benchmark failed.
     any_failed = any(not r.passed for r in results)
