@@ -38,7 +38,10 @@ from territory_takeover.engine import new_game, step
 from territory_takeover.rl.alphazero.evaluator import NNEvaluator
 from territory_takeover.rl.alphazero.network import AlphaZeroNet, AZNetConfig
 from territory_takeover.rl.alphazero.replay import ReplayBuffer
-from territory_takeover.rl.alphazero.selfplay import SelfPlayConfig, play_game
+from territory_takeover.rl.alphazero.selfplay import (
+    SelfPlayConfig,
+    play_game_instrumented,
+)
 from territory_takeover.rl.alphazero.spaces import grid_channel_count, scalar_feature_dim
 from territory_takeover.rl.alphazero.train import TrainConfig, train_step
 from territory_takeover.rl.curriculum.schedule import (
@@ -261,17 +264,19 @@ def train_curriculum(
                     for _ in range(max(1, train_cfg.iterations_per_eval)):
                         for _ in range(stage.games_per_iteration):
                             evaluator.reset()
-                            samples = play_game(evaluator, sp_cfg, rng=rng)
+                            samples, first_enc_in_game = play_game_instrumented(
+                                evaluator, sp_cfg, rng=rng
+                            )
                             buffer.extend(samples)
                             total_half_moves += len(samples)
                             promotion.record_steps(len(samples))
                             cumulative_steps += len(samples)
 
-                            if first_enclosure_step is None and any(
-                                s.final_scores[p] > _NEUTRAL_SCORE
-                                for s in samples
-                                for p in range(stage.num_players)
-                            ):
+                            if first_enclosure_step is None and first_enc_in_game is not None:
+                                # Record the cumulative stage-step at which
+                                # the first enclosure observed in ANY game
+                                # of this stage happened. Approximate: we
+                                # don't subtract the mid-game offset.
                                 first_enclosure_step = promotion.stage_steps
 
                         losses_acc = {
@@ -372,13 +377,6 @@ def train_curriculum(
         json.dumps([asdict(r) for r in results], indent=2)
     )
     return results
-
-
-# Sentinel: any positive per-seat score in ``final_scores`` (normalized
-# to [-1, 1]) means at least one player claimed territory by enclosure.
-# ``_terminal_value_normalized`` maps claim share linearly into that
-# range, so a strictly-positive entry implies a non-trivial share.
-_NEUTRAL_SCORE = -0.9
 
 
 __all__ = ["CurriculumTrainConfig", "StageResult", "train_curriculum"]

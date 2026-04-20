@@ -19,13 +19,21 @@ from territory_takeover.rl.curriculum.schedule import (
     Stage,
     load_schedule_yaml,
 )
+from territory_takeover.rl.curriculum.trainer import (
+    CurriculumTrainConfig,
+    StageResult,
+    train_curriculum,
+)
 from territory_takeover.rl.curriculum.transfer import transfer_weights
 
 __all__ = [
+    "CurriculumTrainConfig",
     "PromotionCriterion",
     "PromotionState",
     "Schedule",
     "Stage",
+    "StageResult",
     "load_schedule_yaml",
+    "train_curriculum",
     "transfer_weights",
 ]
