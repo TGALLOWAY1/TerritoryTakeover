@@ -8,7 +8,7 @@ from typing import Any
 
 import numpy as np
 
-from .actions import action_to_coord, legal_action_mask, legal_actions
+from .actions import has_any_legal_action
 from .constants import CLAIMED_CODES, DIRECTIONS, EMPTY, PATH_CODES
 from .state import GameState, PlayerState
 
@@ -52,7 +52,11 @@ def _default_spawns(board_size: int, num_players: int) -> list[tuple[int, int]]:
 
 
 def _seed_player_state(state: GameState, spawns: list[tuple[int, int]]) -> None:
-    """Write spawn tiles into `state.grid` and (re)seed each `PlayerState` in place."""
+    """Write spawn tiles into `state.grid` and (re)seed each `PlayerState` in place.
+
+    Also seeds `state.alive_count` to the total seat count, since every seated
+    player starts alive.
+    """
     for i, spawn in enumerate(spawns):
         r, c = spawn
         state.grid[r, c] = PATH_CODES[i]
@@ -62,6 +66,9 @@ def _seed_player_state(state: GameState, spawns: list[tuple[int, int]]) -> None:
         p.head = spawn
         p.claimed_count = 0
         p.alive = True
+    state.alive_count = len(spawns)
+    h, w = state.grid.shape
+    state.empty_count = h * w - len(spawns)
 
 
 def new_game(
@@ -174,19 +181,129 @@ def detect_and_apply_enclosure(
 
     Attribution rule: enclosed empty cells are claimed by `player_id` (the player
     whose placement triggered detection), even if opponent path tiles form part of
-    the pocket's boundary. A majority-boundary variant is a possible future
-    extension; not implemented here.
+    the pocket's boundary. Any empty region currently unreachable from the board
+    perimeter is claimed — not only regions closed by the triggering move. This
+    matches the legacy full-board BFS semantics: the trigger acts as a gate, but
+    the claim set is the full complement of the exterior.
 
-    Returns the number of newly-claimed cells (0 if no enclosure formed).
+    Algorithm (optimized). The cheap adjacency trigger (placed_cell adjacent to a
+    same-player path tile other than its predecessor) is unchanged. When it fires,
+    we run a boundary-seeded BFS over EMPTY cells, treating every non-EMPTY tile
+    as a wall, and mark each reached cell in a reusable scratch buffer via a
+    monotonically-increasing stamp (no per-call `np.zeros((H, W))` allocation).
+    Any EMPTY cell not reached is enclosed and gets `CLAIMED_CODES[player_id]`.
+
+    Returns the number of newly-claimed cells (0 if nothing is enclosed).
     """
     player = state.players[player_id]
     path = player.path
     path_set = player.path_set
     grid = state.grid
 
-    # Trigger check: a loop can only have just closed if `placed_cell` is
-    # orthogonally adjacent to a same-player path tile OTHER than its predecessor
-    # (the predecessor is always adjacent and always in path_set).
+    # Trigger check. Predecessor is always adjacent and always in path_set,
+    # so we skip it; any *other* adjacent same-player path tile means a loop
+    # just closed.
+    predecessor = path[-2] if len(path) >= 2 else None
+    r, c = placed_cell
+    triggered = False
+    for dr, dc in DIRECTIONS:
+        nbr = (r + dr, c + dc)
+        if nbr == predecessor:
+            continue
+        if nbr in path_set:
+            triggered = True
+            break
+    if not triggered:
+        return 0
+
+    h, w = grid.shape
+
+    # Scratch reachability buffer reused across calls. A monotonically
+    # increasing stamp lets us avoid clearing H*W entries per call: a cell
+    # counts as "reached this call" only if `scratch[r, c] == stamp`. On
+    # stamp overflow (very rare — int32 headroom is >2B calls) we reset.
+    scratch = state._scratch_reachable
+    if scratch is None or scratch.shape != grid.shape:
+        scratch = np.zeros((h, w), dtype=np.int32)
+        state._scratch_reachable = scratch
+    stamp = state._enclosure_stamp + 1
+    if stamp >= 0x7FFFFFFF:
+        scratch.fill(0)
+        stamp = 1
+    state._enclosure_stamp = stamp
+
+    # Boundary BFS: flood from every EMPTY cell on the outer perimeter.
+    q: deque[tuple[int, int]] = deque()
+    reachable_count = 0
+    for cc in range(w):
+        if grid.item(0, cc) == EMPTY:
+            scratch[0, cc] = stamp
+            q.append((0, cc))
+            reachable_count += 1
+        if h > 1 and grid.item(h - 1, cc) == EMPTY:
+            scratch[h - 1, cc] = stamp
+            q.append((h - 1, cc))
+            reachable_count += 1
+    for rr in range(1, h - 1):
+        if grid.item(rr, 0) == EMPTY:
+            scratch[rr, 0] = stamp
+            q.append((rr, 0))
+            reachable_count += 1
+        if w > 1 and grid.item(rr, w - 1) == EMPTY:
+            scratch[rr, w - 1] = stamp
+            q.append((rr, w - 1))
+            reachable_count += 1
+
+    while q:
+        cr, cc = q.popleft()
+        for dr, dc in DIRECTIONS:
+            nr, nc = cr + dr, cc + dc
+            if not (0 <= nr < h and 0 <= nc < w):
+                continue
+            if scratch.item(nr, nc) == stamp:
+                continue
+            if grid.item(nr, nc) != EMPTY:
+                continue
+            scratch[nr, nc] = stamp
+            q.append((nr, nc))
+            reachable_count += 1
+
+    # Early exit on the hot path: when the BFS reached every EMPTY cell, no
+    # region is enclosed. Skips the `(grid == EMPTY) & (scratch != stamp)`
+    # mask/sum/assignment entirely — this case accounts for ~85-87% of
+    # trigger fires on random 20-40 board play (see `bench_trigger_fire_rate`).
+    if state.empty_count < 0:
+        # Lazy-seed for callers that bypassed new_game/reset.
+        state.empty_count = int((grid == EMPTY).sum())
+    enclosed = state.empty_count - reachable_count
+    if enclosed == 0:
+        return 0
+
+    enclosed_mask = (grid == EMPTY) & (scratch != stamp)
+    count = int(enclosed_mask.sum())
+    if count:
+        grid[enclosed_mask] = CLAIMED_CODES[player_id]
+        player.claimed_count += count
+        state.empty_count -= count
+    return count
+
+
+def _legacy_detect_and_apply_enclosure_full_bfs(
+    state: GameState,
+    player_id: int,
+    placed_cell: tuple[int, int],
+) -> int:
+    """Reference implementation: full-board boundary BFS. Used by equivalence tests.
+
+    Kept unchanged so `tests/test_engine_equivalence.py` can assert that the
+    optimized `detect_and_apply_enclosure` produces identical `(grid,
+    claimed_count)` outputs across randomized trajectories.
+    """
+    player = state.players[player_id]
+    path = player.path
+    path_set = player.path_set
+    grid = state.grid
+
     predecessor = path[-2] if len(path) >= 2 else None
     r, c = placed_cell
     triggered = False
@@ -244,9 +361,10 @@ def _advance_turn(state: GameState) -> None:
     """Move `current_player` forward to the next alive player with ≥1 legal action.
 
     Any alive player reached with 0 legal actions is marked `alive = False` and
-    skipped. `turn_number` is always incremented once (even if nobody can move,
-    so the counter still reflects elapsed game time); the caller is responsible
-    for setting `state.done` based on post-advance alive counts.
+    skipped (and `state.alive_count` decremented). `turn_number` is always
+    incremented once (even if nobody can move, so the counter still reflects
+    elapsed game time); the caller is responsible for setting `state.done`
+    based on post-advance alive counts.
     """
     n = len(state.players)
     start = state.current_player
@@ -255,11 +373,12 @@ def _advance_turn(state: GameState) -> None:
         p = state.players[candidate]
         if not p.alive:
             continue
-        if legal_actions(state, candidate):
+        if has_any_legal_action(state, candidate):
             state.current_player = candidate
             state.turn_number += 1
             return
         p.alive = False
+        state.alive_count -= 1
     # No alive player has any moves; still bump turn_number.
     state.turn_number += 1
 
@@ -292,42 +411,71 @@ def step(state: GameState, action: int, strict: bool = False) -> StepResult:
     if state.done:
         raise ValueError("step() called on a finished game (state.done is True)")
 
-    player_who_moved = state.current_player
-    info: dict[str, Any] = {
-        "claimed_this_turn": 0,
-        "player_who_moved": player_who_moved,
-        "illegal_move": False,
-    }
-    reward = 0.0
+    # Lazy-seed the incremental alive_count for callers that built a
+    # `GameState` directly (bypassing `new_game` / `reset`). -1 is the
+    # sentinel set by `GameState.__init__`'s default.
+    if state.alive_count < 0:
+        state.alive_count = sum(1 for _p in state.players if _p.alive)
 
-    mask = legal_action_mask(state, player_who_moved)
-    action_in_range = 0 <= action < 4
-    if not action_in_range or not bool(mask[action]):
+    player_who_moved = state.current_player
+    reward = 0.0
+    claimed = 0
+    illegal = False
+
+    # Inline legality check — bypasses the np.zeros(4) allocation that
+    # `legal_action_mask` performs. The target cell is legal iff in-bounds
+    # and EMPTY.
+    p = state.players[player_who_moved]
+    pr, pc = p.head
+    grid = state.grid
+    h, w = grid.shape
+    if 0 <= action < 4:
+        dr, dc = DIRECTIONS[action]
+        tr, tc = pr + dr, pc + dc
+        legal = (
+            0 <= tr < h
+            and 0 <= tc < w
+            and grid.item(tr, tc) == EMPTY
+        )
+    else:
+        legal = False
+
+    if not legal:
         if strict:
             raise IllegalMoveError(
                 f"player {player_who_moved} tried illegal action {action}"
             )
-        info["illegal_move"] = True
-        state.players[player_who_moved].alive = False
+        illegal = True
+        if p.alive:
+            p.alive = False
+            state.alive_count -= 1
     else:
-        target = action_to_coord(state, player_who_moved, action)
-        p = state.players[player_who_moved]
-        state.grid[target] = PATH_CODES[player_who_moved]
+        target = (tr, tc)
+        grid[tr, tc] = PATH_CODES[player_who_moved]
         p.path.append(target)
         p.path_set.add(target)
         p.head = target
+        if state.empty_count > 0:
+            state.empty_count -= 1
         claimed = detect_and_apply_enclosure(state, player_who_moved, target)
-        info["claimed_this_turn"] = claimed
         reward = 1.0 + float(claimed)
 
     _advance_turn(state)
 
-    alive_count = sum(1 for p in state.players if p.alive)
-    if alive_count <= 1:
+    if state.alive_count <= 1:
         state.done = True
         state.winner = _compute_winner(state)
 
-    return StepResult(state=state, reward=reward, done=state.done, info=info)
+    return StepResult(
+        state=state,
+        reward=reward,
+        done=state.done,
+        info={
+            "claimed_this_turn": claimed,
+            "player_who_moved": player_who_moved,
+            "illegal_move": illegal,
+        },
+    )
 
 
 def compute_terminal_reward(
