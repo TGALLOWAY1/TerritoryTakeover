@@ -1,0 +1,39 @@
+# Phase 3c AlphaZero smoke config with n-step value target enabled.
+# Identical to phase3c_alphazero_smoke.yaml except for the value-target mode
+# and a modest horizon sized for the 12-half-move cap. Intended for CI-speed
+# verification that the n-step training path runs end-to-end; strength
+# comparisons happen under the 04_experiment_plan.md protocol, not here.
+board_size: 6
+num_players: 2
+spawn_positions: [[0, 0], [5, 5]]
+seed: 0
+device: cpu
+out_dir: results/phase3c_nstep_smoke
+
+net:
+  num_res_blocks: 1
+  channels: 8
+  value_hidden: 8
+  scalar_value_head: false
+
+train:
+  num_iterations: 2
+  games_per_iteration: 1
+  train_steps_per_iteration: 3
+  batch_size: 4
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 128
+  snapshot_every: 1
+
+self_play:
+  puct_iterations: 4
+  c_puct: 1.25
+  dirichlet_alpha: 0.3
+  dirichlet_eps: 0.25
+  temperature_moves: 4
+  max_half_moves: 12
+  value_target_mode: nstep
+  n_step: 4
+  gamma: 0.99

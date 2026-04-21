@@ -35,13 +35,30 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class Sample:
-    """A single training sample emitted by self-play."""
+    """A single training sample emitted by self-play.
+
+    ``final_scores`` holds the per-seat value-head target: the terminal
+    normalized score vector in the default "terminal" mode and the
+    per-sample n-step bootstrapped return in the "nstep" mode. The name
+    is kept for serialization continuity with Phase 3c buffers — the
+    shape and dtype are unchanged.
+
+    ``per_step_reward`` and ``step_index`` are metadata populated by
+    :mod:`.selfplay` for every sample. They are consumed by unit tests
+    and by offline analysis of n-step training; ``train_step`` does
+    not read them because the value target is precomputed into
+    ``final_scores`` at self-play time. Default ``0.0`` / ``-1``
+    preserves backward compatibility with call sites that still
+    construct Samples with only the original five fields.
+    """
 
     grid: NDArray[np.float32]
     scalars: NDArray[np.float32]
     mask: NDArray[np.bool_]
     visits: NDArray[np.float32]
     final_scores: NDArray[np.float32]
+    per_step_reward: float = 0.0
+    step_index: int = -1
 
 
 class ReplayBuffer:
@@ -65,6 +82,8 @@ class ReplayBuffer:
         self._masks = np.zeros((capacity, 4), dtype=np.bool_)
         self._visits = np.zeros((capacity, 4), dtype=np.float32)
         self._final = np.zeros((capacity, num_players), dtype=np.float32)
+        self._per_step_reward = np.zeros((capacity,), dtype=np.float32)
+        self._step_index = np.full((capacity,), -1, dtype=np.int32)
         self._write_idx: int = 0
         self._size: int = 0
 
@@ -78,6 +97,8 @@ class ReplayBuffer:
         self._masks[i] = sample.mask
         self._visits[i] = sample.visits
         self._final[i] = sample.final_scores
+        self._per_step_reward[i] = sample.per_step_reward
+        self._step_index[i] = sample.step_index
         self._write_idx = (i + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
 
@@ -115,6 +136,8 @@ class ReplayBuffer:
             masks=self._masks[: self._size],
             visits=self._visits[: self._size],
             final=self._final[: self._size],
+            per_step_reward=self._per_step_reward[: self._size],
+            step_index=self._step_index[: self._size],
             write_idx=np.array([self._write_idx], dtype=np.int64),
             size=np.array([self._size], dtype=np.int64),
         )
@@ -128,6 +151,20 @@ class ReplayBuffer:
             visits = data["visits"]
             final = data["final"]
             size = int(data["size"][0])
+            # Per-step reward / step-index columns were added with the
+            # n-step value target. Older saves predate them; load as
+            # zeros / -1 so downstream code that only reads `_final`
+            # is unaffected.
+            per_step_reward = (
+                data["per_step_reward"]
+                if "per_step_reward" in data.files
+                else np.zeros((size,), dtype=np.float32)
+            )
+            step_index = (
+                data["step_index"]
+                if "step_index" in data.files
+                else np.full((size,), -1, dtype=np.int32)
+            )
         grid_shape = tuple(grids.shape[1:])
         assert len(grid_shape) == 3, "grid shape must be (C, H, W)"
         buf = cls(
@@ -142,6 +179,8 @@ class ReplayBuffer:
         buf._masks[:n] = masks[:n]
         buf._visits[:n] = visits[:n]
         buf._final[:n] = final[:n]
+        buf._per_step_reward[:n] = per_step_reward[:n]
+        buf._step_index[:n] = step_index[:n]
         buf._size = n
         buf._write_idx = n % capacity
         return buf
