@@ -1,0 +1,278 @@
+{
+  "buckets": {
+    "enclosure": {
+      "ncalls": 4679,
+      "pct": 9.69,
+      "time_s": 0.247141
+    },
+    "evaluator_cache": {
+      "ncalls": 21976,
+      "pct": 3.29,
+      "time_s": 0.083945
+    },
+    "import_overhead": {
+      "ncalls": 39,
+      "pct": 0.12,
+      "time_s": 0.003179
+    },
+    "legal_actions": {
+      "ncalls": 9235,
+      "pct": 0.78,
+      "time_s": 0.019762
+    },
+    "mcts_puct": {
+      "ncalls": 17869,
+      "pct": 3.66,
+      "time_s": 0.093426
+    },
+    "nn_module": {
+      "ncalls": 2986,
+      "pct": 3.36,
+      "time_s": 0.085772
+    },
+    "nn_train": {
+      "ncalls": 122,
+      "pct": 0.53,
+      "time_s": 0.013469
+    },
+    "numpy_ops": {
+      "ncalls": 553588,
+      "pct": 4.07,
+      "time_s": 0.103678
+    },
+    "observation_encode": {
+      "ncalls": 3595,
+      "pct": 1.49,
+      "time_s": 0.038003
+    },
+    "other": {
+      "ncalls": 226092,
+      "pct": 4.27,
+      "time_s": 0.10886
+    },
+    "python_stdlib": {
+      "ncalls": 182642,
+      "pct": 0.65,
+      "time_s": 0.016491
+    },
+    "replay_buffer": {
+      "ncalls": 291,
+      "pct": 0.16,
+      "time_s": 0.004077
+    },
+    "selfplay_driver": {
+      "ncalls": 304,
+      "pct": 0.11,
+      "time_s": 0.002684
+    },
+    "state_copy": {
+      "ncalls": 9358,
+      "pct": 1.21,
+      "time_s": 0.03088
+    },
+    "step_glue": {
+      "ncalls": 9668,
+      "pct": 1.6,
+      "time_s": 0.04089
+    },
+    "torch_nn": {
+      "ncalls": 190929,
+      "pct": 10.77,
+      "time_s": 0.274487
+    },
+    "torch_ops": {
+      "ncalls": 118010,
+      "pct": 53.11,
+      "time_s": 1.353875
+    },
+    "torch_other": {
+      "ncalls": 29406,
+      "pct": 1.12,
+      "time_s": 0.028606
+    }
+  },
+  "top_tottime": [
+    {
+      "cumtime_s": 0.488327,
+      "name": "~:<built-in method torch.conv2d>",
+      "ncalls": 6951,
+      "tottime_s": 0.488327
+    },
+    {
+      "cumtime_s": 0.309987,
+      "name": "~:<method 'run_backward' of 'torch._C._EngineBase' objects>",
+      "ncalls": 40,
+      "tottime_s": 0.309987
+    },
+    {
+      "cumtime_s": 0.322795,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:detect_and_apply_enclosure",
+      "ncalls": 4679,
+      "tottime_s": 0.247141
+    },
+    {
+      "cumtime_s": 0.24654,
+      "name": "~:<built-in method torch.batch_norm>",
+      "ncalls": 6951,
+      "tottime_s": 0.24654
+    },
+    {
+      "cumtime_s": 0.059422,
+      "name": "~:<method 'item' of 'numpy.ndarray' objects>",
+      "ncalls": 506282,
+      "tottime_s": 0.059422
+    },
+    {
+      "cumtime_s": 0.624999,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/network.py:forward",
+      "ncalls": 1986,
+      "tottime_s": 0.048072
+    },
+    {
+      "cumtime_s": 0.045985,
+      "name": "~:<built-in method torch.relu>",
+      "ncalls": 7944,
+      "tottime_s": 0.045985
+    },
+    {
+      "cumtime_s": 0.045969,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py:__getattr__",
+      "ncalls": 74873,
+      "tottime_s": 0.045969
+    },
+    {
+      "cumtime_s": 0.04374,
+      "name": "~:<built-in method torch._C._nn.adaptive_avg_pool2d>",
+      "ncalls": 1986,
+      "tottime_s": 0.04374
+    },
+    {
+      "cumtime_s": 1.234764,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py:_call_impl",
+      "ncalls": 21846,
+      "tottime_s": 0.040004
+    },
+    {
+      "cumtime_s": 1.228977,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/network.py:forward",
+      "ncalls": 993,
+      "tottime_s": 0.037596
+    },
+    {
+      "cumtime_s": 0.051198,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/spaces.py:encode_az_observation",
+      "ncalls": 1197,
+      "tottime_s": 0.037268
+    },
+    {
+      "cumtime_s": 0.335681,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/batchnorm.py:forward",
+      "ncalls": 6951,
+      "tottime_s": 0.036927
+    },
+    {
+      "cumtime_s": 0.031988,
+      "name": "~:<built-in method torch._C._nn.linear>",
+      "ncalls": 2979,
+      "tottime_s": 0.031988
+    },
+    {
+      "cumtime_s": 0.376037,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:step",
+      "ncalls": 4679,
+      "tottime_s": 0.030546
+    }
+  ],
+  "top_unmatched": [
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/shape_base.py:stack",
+      "ncalls": 2859,
+      "tottime_s": 0.022332
+    },
+    {
+      "name": "~:<method 'copy' of 'set' objects>",
+      "ncalls": 9358,
+      "tottime_s": 0.007319
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:__init__",
+      "ncalls": 4679,
+      "tottime_s": 0.007181
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:q_value",
+      "ncalls": 8482,
+      "tottime_s": 0.005089
+    },
+    {
+      "name": "~:<method 'get' of 'dict' objects>",
+      "ncalls": 22331,
+      "tottime_s": 0.004589
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/ppo/spaces.py:apply_action_mask",
+      "ncalls": 993,
+      "tottime_s": 0.004524
+    },
+    {
+      "name": "~:<built-in method builtins.isinstance>",
+      "ncalls": 18966,
+      "tottime_s": 0.004213
+    },
+    {
+      "name": "~:<method 'append' of 'list' objects>",
+      "ncalls": 19759,
+      "tottime_s": 0.003265
+    },
+    {
+      "name": "~:<built-in method builtins.len>",
+      "ncalls": 23107,
+      "tottime_s": 0.003245
+    },
+    {
+      "name": "<string>:__init__",
+      "ncalls": 9366,
+      "tottime_s": 0.003202
+    },
+    {
+      "name": "~:<method 'copy' of 'list' objects>",
+      "ncalls": 9358,
+      "tottime_s": 0.002637
+    },
+    {
+      "name": "~:<built-in method builtins.max>",
+      "ncalls": 8585,
+      "tottime_s": 0.002401
+    },
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/numeric.py:count_nonzero",
+      "ncalls": 3591,
+      "tottime_s": 0.002201
+    },
+    {
+      "name": "~:<method 'add' of 'set' objects>",
+      "ncalls": 8705,
+      "tottime_s": 0.001991
+    },
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/shape_base.py:<listcomp>",
+      "ncalls": 2859,
+      "tottime_s": 0.001951
+    }
+  ],
+  "total_tottime_s": 2.549226,
+  "wall_time_s": 2.553785,
+  "workload": "az_iteration_10",
+  "workload_params": {
+    "batch_size": 32,
+    "board": 10,
+    "channels": 32,
+    "config": "configs/bench_alphazero_10x10_phase3d_like.yaml",
+    "games_per_iteration": 4,
+    "num_players": 2,
+    "num_res_blocks": 2,
+    "puct_iterations": 8,
+    "seed": 0,
+    "train_steps_per_iteration": 40
+  }
+}

@@ -1,0 +1,36 @@
+# One-iteration AlphaZero profile config matching phase3d_curriculum_fast
+# stage s0_6x6_2p scale (32 channels, 2 res blocks, 8 PUCT iters, 4 games,
+# 40 train steps). Used by benchmarks/bench_pipeline.py az to get a cost
+# breakdown representative of a real training stage, unlike the 8-channel
+# smoke config.
+board_size: 6
+num_players: 2
+spawn_positions: [[0, 0], [5, 5]]
+seed: 0
+device: cpu
+out_dir: benchmarks/profiles/az_iteration_6_phase3d_like_tmp
+
+net:
+  num_res_blocks: 2
+  channels: 32
+  value_hidden: 32
+  head_type: conv
+
+train:
+  num_iterations: 1
+  games_per_iteration: 4
+  train_steps_per_iteration: 40
+  batch_size: 32
+  learning_rate: 0.001
+  l2_weight: 0.0001
+  value_loss_coef: 1.0
+  buffer_capacity: 10000
+  snapshot_every: 10
+
+self_play:
+  puct_iterations: 8
+  c_puct: 1.25
+  dirichlet_alpha: 0.3
+  dirichlet_eps: 0.25
+  temperature_moves: 6
+  max_half_moves: 80
