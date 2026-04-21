@@ -1,0 +1,237 @@
+{
+  "buckets": {
+    "enclosure": {
+      "ncalls": 1939,
+      "pct": 63.88,
+      "time_s": 0.074349
+    },
+    "evaluator_heuristic": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "legal_actions": {
+      "ncalls": 2089,
+      "pct": 1.76,
+      "time_s": 0.002052
+    },
+    "mcts_backprop": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "mcts_expansion": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "mcts_node": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "mcts_rave": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "mcts_selection": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "numpy_ops": {
+      "ncalls": 178208,
+      "pct": 16.13,
+      "time_s": 0.018773
+    },
+    "other": {
+      "ncalls": 18084,
+      "pct": 1.81,
+      "time_s": 0.002101
+    },
+    "python_stdlib": {
+      "ncalls": 68525,
+      "pct": 6.67,
+      "time_s": 0.007764
+    },
+    "random_rollout_fast": {
+      "ncalls": 50,
+      "pct": 7.11,
+      "time_s": 0.00827
+    },
+    "rollout_mcts": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "state_copy": {
+      "ncalls": 100,
+      "pct": 0.37,
+      "time_s": 0.000431
+    },
+    "step_glue": {
+      "ncalls": 2089,
+      "pct": 2.27,
+      "time_s": 0.00264
+    }
+  },
+  "games_per_sec": 428.538,
+  "top_tottime": [
+    {
+      "cumtime_s": 0.096668,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:detect_and_apply_enclosure",
+      "ncalls": 1939,
+      "tottime_s": 0.074349
+    },
+    {
+      "cumtime_s": 0.018169,
+      "name": "~:<method 'item' of 'numpy.ndarray' objects>",
+      "ncalls": 177840,
+      "tottime_s": 0.018169
+    },
+    {
+      "cumtime_s": 0.115772,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rollout.py:simulate_random_rollout",
+      "ncalls": 50,
+      "tottime_s": 0.00827
+    },
+    {
+      "cumtime_s": 0.005083,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:_advance_turn",
+      "ncalls": 1939,
+      "tottime_s": 0.002391
+    },
+    {
+      "cumtime_s": 0.002354,
+      "name": "~:<method 'append' of 'collections.deque' objects>",
+      "ncalls": 30497,
+      "tottime_s": 0.002354
+    },
+    {
+      "cumtime_s": 0.002293,
+      "name": "~:<method 'popleft' of 'collections.deque' objects>",
+      "ncalls": 30497,
+      "tottime_s": 0.002293
+    },
+    {
+      "cumtime_s": 0.002514,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/actions.py:has_any_legal_action",
+      "ncalls": 2089,
+      "tottime_s": 0.002052
+    },
+    {
+      "cumtime_s": 0.00209,
+      "name": "/usr/lib/python3.11/random.py:_randbelow_with_getrandbits",
+      "ncalls": 1939,
+      "tottime_s": 0.001523
+    },
+    {
+      "cumtime_s": 0.003545,
+      "name": "/usr/lib/python3.11/random.py:randrange",
+      "ncalls": 1939,
+      "tottime_s": 0.001253
+    },
+    {
+      "cumtime_s": 0.000634,
+      "name": "~:<method 'append' of 'list' objects>",
+      "ncalls": 5565,
+      "tottime_s": 0.000634
+    },
+    {
+      "cumtime_s": 0.000531,
+      "name": "~:<built-in method builtins.len>",
+      "ncalls": 6067,
+      "tottime_s": 0.000531
+    },
+    {
+      "cumtime_s": 0.000417,
+      "name": "~:<method 'reduce' of 'numpy.ufunc' objects>",
+      "ncalls": 134,
+      "tottime_s": 0.000417
+    },
+    {
+      "cumtime_s": 0.00034,
+      "name": "~:<method 'getrandbits' of '_random.Random' objects>",
+      "ncalls": 3653,
+      "tottime_s": 0.00034
+    },
+    {
+      "cumtime_s": 0.00047,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/state.py:<listcomp>",
+      "ncalls": 50,
+      "tottime_s": 0.000305
+    },
+    {
+      "cumtime_s": 0.000301,
+      "name": "~:<method 'add' of 'set' objects>",
+      "ncalls": 1939,
+      "tottime_s": 0.000301
+    }
+  ],
+  "top_unmatched": [
+    {
+      "name": "~:<method 'append' of 'list' objects>",
+      "ncalls": 5565,
+      "tottime_s": 0.000634
+    },
+    {
+      "name": "~:<built-in method builtins.len>",
+      "ncalls": 6067,
+      "tottime_s": 0.000531
+    },
+    {
+      "name": "~:<method 'add' of 'set' objects>",
+      "ncalls": 1939,
+      "tottime_s": 0.000301
+    },
+    {
+      "name": "~:<method 'bit_length' of 'int' objects>",
+      "ncalls": 1939,
+      "tottime_s": 0.000226
+    },
+    {
+      "name": "~:<built-in method _operator.index>",
+      "ncalls": 1939,
+      "tottime_s": 0.000202
+    },
+    {
+      "name": "~:<method 'copy' of 'set' objects>",
+      "ncalls": 200,
+      "tottime_s": 7.3e-05
+    },
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:_sum",
+      "ncalls": 134,
+      "tottime_s": 6e-05
+    },
+    {
+      "name": "~:<method 'copy' of 'list' objects>",
+      "ncalls": 200,
+      "tottime_s": 2.8e-05
+    },
+    {
+      "name": "~:<built-in method builtins.max>",
+      "ncalls": 50,
+      "tottime_s": 2.6e-05
+    },
+    {
+      "name": "<string>:__init__",
+      "ncalls": 50,
+      "tottime_s": 2e-05
+    },
+    {
+      "name": "~:<method 'disable' of '_lsprof.Profiler' objects>",
+      "ncalls": 1,
+      "tottime_s": 1e-06
+    }
+  ],
+  "total_tottime_s": 0.116379,
+  "wall_time_s": 0.116676,
+  "workload": "rollout_10",
+  "workload_params": {
+    "board": 10,
+    "games": 50,
+    "seed": 0
+  }
+}

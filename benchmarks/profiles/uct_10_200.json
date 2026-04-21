@@ -1,0 +1,260 @@
+{
+  "buckets": {
+    "enclosure": {
+      "ncalls": 125155,
+      "pct": 57.72,
+      "time_s": 5.952801
+    },
+    "evaluator_heuristic": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "legal_actions": {
+      "ncalls": 256783,
+      "pct": 3.83,
+      "time_s": 0.395367
+    },
+    "mcts_backprop": {
+      "ncalls": 8643,
+      "pct": 0.79,
+      "time_s": 0.081888
+    },
+    "mcts_expansion": {
+      "ncalls": 14986,
+      "pct": 0.54,
+      "time_s": 0.056028
+    },
+    "mcts_node": {
+      "ncalls": 328813,
+      "pct": 1.98,
+      "time_s": 0.20451
+    },
+    "mcts_rave": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "mcts_selection": {
+      "ncalls": 8600,
+      "pct": 0.95,
+      "time_s": 0.098033
+    },
+    "numpy_ops": {
+      "ncalls": 13167786,
+      "pct": 14.55,
+      "time_s": 1.500843
+    },
+    "other": {
+      "ncalls": 1690308,
+      "pct": 3.72,
+      "time_s": 0.383665
+    },
+    "python_stdlib": {
+      "ncalls": 4650062,
+      "pct": 3.58,
+      "time_s": 0.369029
+    },
+    "random_rollout_fast": {
+      "ncalls": 0,
+      "pct": 0.0,
+      "time_s": 0.0
+    },
+    "rollout_mcts": {
+      "ncalls": 19519,
+      "pct": 4.05,
+      "time_s": 0.417561
+    },
+    "state_copy": {
+      "ncalls": 25906,
+      "pct": 0.76,
+      "time_s": 0.078435
+    },
+    "step_glue": {
+      "ncalls": 270014,
+      "pct": 7.52,
+      "time_s": 0.775592
+    }
+  },
+  "half_moves": 86,
+  "moves_per_sec": 8.326,
+  "top_tottime": [
+    {
+      "cumtime_s": 7.70357,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:detect_and_apply_enclosure",
+      "ncalls": 125155,
+      "tottime_s": 5.952801
+    },
+    {
+      "cumtime_s": 1.423439,
+      "name": "~:<method 'item' of 'numpy.ndarray' objects>",
+      "ncalls": 13117866,
+      "tottime_s": 1.423439
+    },
+    {
+      "cumtime_s": 8.767932,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:step",
+      "ncalls": 125155,
+      "tottime_s": 0.562462
+    },
+    {
+      "cumtime_s": 9.069931,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/rollout.py:uniform_rollout",
+      "ncalls": 6385,
+      "tottime_s": 0.399265
+    },
+    {
+      "cumtime_s": 0.335596,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/actions.py:legal_actions",
+      "ncalls": 125060,
+      "tottime_s": 0.251751
+    },
+    {
+      "cumtime_s": 0.186606,
+      "name": "~:<method 'append' of 'collections.deque' objects>",
+      "ncalls": 2325031,
+      "tottime_s": 0.186606
+    },
+    {
+      "cumtime_s": 0.182423,
+      "name": "~:<method 'popleft' of 'collections.deque' objects>",
+      "ncalls": 2325031,
+      "tottime_s": 0.182423
+    },
+    {
+      "cumtime_s": 0.363383,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:_advance_turn",
+      "ncalls": 125155,
+      "tottime_s": 0.178001
+    },
+    {
+      "cumtime_s": 0.173492,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/actions.py:has_any_legal_action",
+      "ncalls": 131723,
+      "tottime_s": 0.143617
+    },
+    {
+      "cumtime_s": 0.216658,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:ucb_score",
+      "ncalls": 122075,
+      "tottime_s": 0.123765
+    },
+    {
+      "cumtime_s": 0.448853,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:_select",
+      "ncalls": 8600,
+      "tottime_s": 0.098033
+    },
+    {
+      "cumtime_s": 0.324846,
+      "name": "~:<built-in method builtins.max>",
+      "ncalls": 76106,
+      "tottime_s": 0.064878
+    },
+    {
+      "cumtime_s": 0.062528,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:_backpropagate",
+      "ncalls": 8600,
+      "tottime_s": 0.062528
+    },
+    {
+      "cumtime_s": 0.06016,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:q_value",
+      "ncalls": 122075,
+      "tottime_s": 0.06016
+    },
+    {
+      "cumtime_s": 0.612289,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:_expand",
+      "ncalls": 8600,
+      "tottime_s": 0.047579
+    }
+  ],
+  "top_unmatched": [
+    {
+      "name": "~:<built-in method builtins.max>",
+      "ncalls": 76106,
+      "tottime_s": 0.064878
+    },
+    {
+      "name": "~:<method 'append' of 'list' objects>",
+      "ncalls": 358929,
+      "tottime_s": 0.045997
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:<lambda>",
+      "ncalls": 122075,
+      "tottime_s": 0.043269
+    },
+    {
+      "name": "~:<method 'copy' of 'set' objects>",
+      "ncalls": 25906,
+      "tottime_s": 0.041373
+    },
+    {
+      "name": "~:<built-in method builtins.len>",
+      "ncalls": 415083,
+      "tottime_s": 0.038078
+    },
+    {
+      "name": "<string>:__init__",
+      "ncalls": 125155,
+      "tottime_s": 0.034446
+    },
+    {
+      "name": "~:<method 'add' of 'set' objects>",
+      "ncalls": 125155,
+      "tottime_s": 0.027384
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:_rollout",
+      "ncalls": 8600,
+      "tottime_s": 0.019964
+    },
+    {
+      "name": "~:<built-in method math.log>",
+      "ncalls": 122075,
+      "tottime_s": 0.019757
+    },
+    {
+      "name": "~:<built-in method math.sqrt>",
+      "ncalls": 122075,
+      "tottime_s": 0.012976
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/uct.py:_pw_reveal",
+      "ncalls": 78095,
+      "tottime_s": 0.010399
+    },
+    {
+      "name": "~:<method 'values' of 'dict' objects>",
+      "ncalls": 69581,
+      "tottime_s": 0.008314
+    },
+    {
+      "name": "~:<method 'copy' of 'list' objects>",
+      "ncalls": 25906,
+      "tottime_s": 0.006876
+    },
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/_methods.py:_sum",
+      "ncalls": 7594,
+      "tottime_s": 0.004079
+    },
+    {
+      "name": "~:<method 'pop' of 'list' objects>",
+      "ncalls": 6567,
+      "tottime_s": 0.003006
+    }
+  ],
+  "total_tottime_s": 10.313754,
+  "wall_time_s": 10.328855,
+  "workload": "uct_10_200",
+  "workload_params": {
+    "board": 10,
+    "iters": 200,
+    "num_players": 2,
+    "rollout_kind": "uniform",
+    "seed": 0
+  }
+}

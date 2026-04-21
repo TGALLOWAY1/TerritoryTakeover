@@ -1,0 +1,278 @@
+{
+  "buckets": {
+    "enclosure": {
+      "ncalls": 1474,
+      "pct": 2.52,
+      "time_s": 0.027093
+    },
+    "evaluator_cache": {
+      "ncalls": 7599,
+      "pct": 2.62,
+      "time_s": 0.028159
+    },
+    "import_overhead": {
+      "ncalls": 39,
+      "pct": 0.29,
+      "time_s": 0.003084
+    },
+    "legal_actions": {
+      "ncalls": 3136,
+      "pct": 0.63,
+      "time_s": 0.006815
+    },
+    "mcts_puct": {
+      "ncalls": 6878,
+      "pct": 3.14,
+      "time_s": 0.033798
+    },
+    "nn_module": {
+      "ncalls": 1093,
+      "pct": 2.87,
+      "time_s": 0.030846
+    },
+    "nn_train": {
+      "ncalls": 122,
+      "pct": 1.18,
+      "time_s": 0.012756
+    },
+    "numpy_ops": {
+      "ncalls": 68227,
+      "pct": 2.04,
+      "time_s": 0.02198
+    },
+    "observation_encode": {
+      "ncalls": 1270,
+      "pct": 1.24,
+      "time_s": 0.013361
+    },
+    "other": {
+      "ncalls": 112107,
+      "pct": 4.04,
+      "time_s": 0.043457
+    },
+    "python_stdlib": {
+      "ncalls": 15972,
+      "pct": 0.15,
+      "time_s": 0.001588
+    },
+    "replay_buffer": {
+      "ncalls": 147,
+      "pct": 0.24,
+      "time_s": 0.002552
+    },
+    "selfplay_driver": {
+      "ncalls": 259,
+      "pct": 0.11,
+      "time_s": 0.001156
+    },
+    "state_copy": {
+      "ncalls": 2948,
+      "pct": 0.93,
+      "time_s": 0.009963
+    },
+    "step_glue": {
+      "ncalls": 3174,
+      "pct": 1.21,
+      "time_s": 0.013038
+    },
+    "torch_nn": {
+      "ncalls": 87445,
+      "pct": 12.52,
+      "time_s": 0.134722
+    },
+    "torch_ops": {
+      "ncalls": 53017,
+      "pct": 62.71,
+      "time_s": 0.675067
+    },
+    "torch_other": {
+      "ncalls": 20572,
+      "pct": 1.58,
+      "time_s": 0.017038
+    }
+  },
+  "top_tottime": [
+    {
+      "cumtime_s": 0.223412,
+      "name": "~:<method 'run_backward' of 'torch._C._EngineBase' objects>",
+      "ncalls": 40,
+      "tottime_s": 0.223412
+    },
+    {
+      "cumtime_s": 0.198964,
+      "name": "~:<built-in method torch.conv2d>",
+      "ncalls": 2534,
+      "tottime_s": 0.198964
+    },
+    {
+      "cumtime_s": 0.096442,
+      "name": "~:<built-in method torch.batch_norm>",
+      "ncalls": 2534,
+      "tottime_s": 0.096442
+    },
+    {
+      "cumtime_s": 0.034918,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/engine.py:detect_and_apply_enclosure",
+      "ncalls": 1474,
+      "tottime_s": 0.027093
+    },
+    {
+      "cumtime_s": 0.022389,
+      "name": "~:<built-in method torch.relu>",
+      "ncalls": 2896,
+      "tottime_s": 0.022389
+    },
+    {
+      "cumtime_s": 0.060039,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/optim/adam.py:_single_tensor_adam",
+      "ncalls": 40,
+      "tottime_s": 0.019233
+    },
+    {
+      "cumtime_s": 0.229447,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/network.py:forward",
+      "ncalls": 724,
+      "tottime_s": 0.016604
+    },
+    {
+      "cumtime_s": 0.016206,
+      "name": "~:<built-in method torch._C._nn.adaptive_avg_pool2d>",
+      "ncalls": 724,
+      "tottime_s": 0.016206
+    },
+    {
+      "cumtime_s": 0.488085,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py:_call_impl",
+      "ncalls": 7964,
+      "tottime_s": 0.01582
+    },
+    {
+      "cumtime_s": 0.015143,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/module.py:__getattr__",
+      "ncalls": 27548,
+      "tottime_s": 0.015143
+    },
+    {
+      "cumtime_s": 0.014706,
+      "name": "~:<method 'sqrt' of 'torch._C.TensorBase' objects>",
+      "ncalls": 1080,
+      "tottime_s": 0.014706
+    },
+    {
+      "cumtime_s": 0.485161,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/network.py:forward",
+      "ncalls": 362,
+      "tottime_s": 0.014119
+    },
+    {
+      "cumtime_s": 0.132113,
+      "name": "/usr/local/lib/python3.11/dist-packages/torch/nn/modules/batchnorm.py:forward",
+      "ncalls": 2534,
+      "tottime_s": 0.013651
+    },
+    {
+      "cumtime_s": 0.018077,
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/alphazero/spaces.py:encode_az_observation",
+      "ncalls": 422,
+      "tottime_s": 0.013125
+    },
+    {
+      "cumtime_s": 0.012986,
+      "name": "~:<built-in method torch._C._nn.linear>",
+      "ncalls": 1086,
+      "tottime_s": 0.012986
+    }
+  ],
+  "top_unmatched": [
+    {
+      "name": "/usr/local/lib/python3.11/dist-packages/numpy/_core/shape_base.py:stack",
+      "ncalls": 966,
+      "tottime_s": 0.005848
+    },
+    {
+      "name": "~:<built-in method builtins.isinstance>",
+      "ncalls": 17560,
+      "tottime_s": 0.003754
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:__init__",
+      "ncalls": 1474,
+      "tottime_s": 0.002343
+    },
+    {
+      "name": "~:<method 'get' of 'dict' objects>",
+      "ncalls": 12552,
+      "tottime_s": 0.002221
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/search/mcts/node.py:q_value",
+      "ncalls": 3230,
+      "tottime_s": 0.001858
+    },
+    {
+      "name": "/home/user/TerritoryTakeover/src/territory_takeover/rl/ppo/spaces.py:apply_action_mask",
+      "ncalls": 362,
+      "tottime_s": 0.001742
+    },
+    {
+      "name": "~:<method 'copy' of 'set' objects>",
+      "ncalls": 2948,
+      "tottime_s": 0.001411
+    },
+    {
+      "name": "~:<method 'append' of 'list' objects>",
+      "ncalls": 10194,
+      "tottime_s": 0.001386
+    },
+    {
+      "name": "~:<built-in method builtins.len>",
+      "ncalls": 8861,
+      "tottime_s": 0.001299
+    },
+    {
+      "name": "~:<method 'add' of 'set' objects>",
+      "ncalls": 5500,
+      "tottime_s": 0.001292
+    },
+    {
+      "name": "<string>:__init__",
+      "ncalls": 2956,
+      "tottime_s": 0.001055
+    },
+    {
+      "name": "~:<built-in method builtins.max>",
+      "ncalls": 3305,
+      "tottime_s": 0.000963
+    },
+    {
+      "name": "~:<built-in method builtins.id>",
+      "ncalls": 6077,
+      "tottime_s": 0.000922
+    },
+    {
+      "name": "~:<method 'items' of 'dict' objects>",
+      "ncalls": 6238,
+      "tottime_s": 0.000876
+    },
+    {
+      "name": "~:<built-in method io.open>",
+      "ncalls": 3,
+      "tottime_s": 0.000769
+    }
+  ],
+  "total_tottime_s": 1.076474,
+  "wall_time_s": 1.078488,
+  "workload": "az_iteration_6",
+  "workload_params": {
+    "batch_size": 32,
+    "board": 6,
+    "channels": 32,
+    "config": "configs/bench_alphazero_6x6_phase3d_like.yaml",
+    "games_per_iteration": 4,
+    "num_players": 2,
+    "num_res_blocks": 2,
+    "puct_iterations": 8,
+    "seed": 0,
+    "train_steps_per_iteration": 40
+  }
+}
