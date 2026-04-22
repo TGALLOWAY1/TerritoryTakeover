@@ -166,3 +166,7 @@ Performance engineering:
   and flaky on shared runners. Reproducibility is provided via the
   commands above plus the seed-locked harness, not CI.
 
+## License
+
+[MIT](LICENSE) — © 2026 TJ Galloway.
+
