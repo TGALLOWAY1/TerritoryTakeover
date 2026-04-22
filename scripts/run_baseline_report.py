@@ -23,6 +23,8 @@ from __future__ import annotations
 import argparse
 import csv
 import itertools
+import math
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -264,6 +266,154 @@ def run_all_pairs(roster: list[Agent], cfg: RunConfig) -> BaselineResult:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ReportMetadata:
+    """Context lines rendered into the report footer.
+
+    Kept separate from :class:`BaselineResult` so the emitter stays a pure
+    function of data (easier to unit-test).
+    """
+
+    uct_iterations: int
+    rave_iterations: int
+    az_iterations: int
+    az_c_puct: float
+    skip_curriculum: bool
+    checkpoint_path: Path
+    commit_sha: str
+    command: str
+
+
+def _current_commit_sha() -> str:
+    """Return the current git short-SHA, or ``"unknown"`` if git is unavailable."""
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return "unknown"
+    return out.strip() or "unknown"
+
+
+def _wilson_fmt(low: float, high: float) -> str:
+    return f"[{low:.3f}, {high:.3f}]"
+
+
+def _format_leaderboard(result: BaselineResult) -> str:
+    """Rank agents by overall win rate with a Wilson 95% CI."""
+    rows: list[tuple[str, int, int, int, int, float, float, float, float]] = []
+    for s in result.per_agent:
+        if s.games == 0:
+            win_rate = 0.0
+            ci_low, ci_high = 0.0, 1.0
+        else:
+            win_rate = s.wins / s.games
+            ci_low, ci_high = _wilson_ci(s.wins, s.games)
+        avg_time = 0.0 if math.isnan(s.avg_decision_time_s) else s.avg_decision_time_s
+        rows.append(
+            (s.name, s.games, s.wins, s.ties, s.losses, win_rate, ci_low, ci_high, avg_time)
+        )
+    rows.sort(key=lambda r: (-r[5], r[0]))
+
+    header = (
+        "| Rank | Agent | Games | Wins | Ties | Losses | Win rate | 95% CI | "
+        "Avg decision (s) |"
+    )
+    sep = "|---:|---|---:|---:|---:|---:|---:|---|---:|"
+    lines = [header, sep]
+    for rank, (name, games, wins, ties, losses, wr, lo, hi, t) in enumerate(rows, start=1):
+        lines.append(
+            f"| {rank} | {name} | {games} | {wins} | {ties} | {losses} | "
+            f"{wr:.3f} | {_wilson_fmt(lo, hi)} | {t:.4f} |"
+        )
+    return "\n".join(lines)
+
+
+def _format_head_to_head(result: BaselineResult) -> str:
+    """Wins/ties/losses matrix (row perspective) over games_per_pair."""
+    names = [s.name for s in result.per_agent]
+    index: dict[tuple[str, str], PairAggregate] = {}
+    for p in result.pairs:
+        index[(p.agent_a, p.agent_b)] = p
+        index[(p.agent_b, p.agent_a)] = p
+
+    header = "| vs | " + " | ".join(names) + " |"
+    sep = "|---|" + "|".join([":---:"] * len(names)) + "|"
+    lines = [header, sep]
+    for row_name in names:
+        cells = [row_name]
+        for col_name in names:
+            if row_name == col_name:
+                cells.append("—")
+                continue
+            p = index[(row_name, col_name)]
+            wins = p.wins_a if row_name == p.agent_a else p.wins_b
+            losses = p.games - wins - p.ties
+            cells.append(f"{wins}/{p.ties}/{losses}")
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append(
+        "*(cell format: wins / ties / losses from row's perspective, "
+        "out of games_per_pair)*"
+    )
+    return "\n".join(lines)
+
+
+def format_report_md(result: BaselineResult, meta: ReportMetadata) -> str:
+    """Render the recruiter-readable markdown report.
+
+    Pure function of ``(result, meta)`` — no filesystem, no git. Deterministic
+    so ``format_report_md(result, meta) == format_report_md(result, meta)``.
+    """
+    checkpoint_line = (
+        "(curriculum agent skipped)"
+        if meta.skip_curriculum
+        else f"`{meta.checkpoint_path}`"
+    )
+    lines = [
+        "# Territory Takeover — Baseline Report",
+        "",
+        (
+            f"Round-robin head-to-head on {result.board_size}x{result.board_size}, "
+            f"{result.num_players} players, {result.games_per_pair} games per pair "
+            "(alternating seats, `SeedSequence`-derived per-game seeds)."
+        ),
+        "",
+        "## Leaderboard",
+        "",
+        _format_leaderboard(result),
+        "",
+        "## Head-to-head",
+        "",
+        _format_head_to_head(result),
+        "",
+        "## Reproducibility",
+        "",
+        f"- Board: {result.board_size}x{result.board_size}, {result.num_players} players",
+        f"- Seed: {result.seed}",
+        f"- UCT iterations: {meta.uct_iterations}",
+        f"- RAVE iterations: {meta.rave_iterations}",
+        f"- AlphaZero iterations: {meta.az_iterations}, c_puct: {meta.az_c_puct}",
+        f"- Checkpoint: {checkpoint_line}",
+        f"- Commit: `{meta.commit_sha}`",
+        f"- Command: `{meta.command}`",
+        "",
+        (
+            "Wilson 95% intervals are computed on overall win rate "
+            "(ties counted against the win rate)."
+        ),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_report_md(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
 def write_pair_csv(path: Path, result: BaselineResult) -> None:
     """Flatten ``result.pairs`` to a per-pair CSV with a stable schema."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -409,7 +559,18 @@ def main(argv: list[str] | None = None) -> int:
     write_pair_csv(args.csv_out, result)
     print(f"[baseline] wrote {args.csv_out}")
 
-    # Markdown emitter lands in the next commit.
+    meta = ReportMetadata(
+        uct_iterations=args.uct_iterations,
+        rave_iterations=args.rave_iterations,
+        az_iterations=args.az_iterations,
+        az_c_puct=cfg.az_c_puct,
+        skip_curriculum=cfg.skip_curriculum,
+        checkpoint_path=cfg.checkpoint_path,
+        commit_sha=_current_commit_sha(),
+        command=" ".join(sys.argv),
+    )
+    write_report_md(args.md_out, format_report_md(result, meta))
+    print(f"[baseline] wrote {args.md_out}")
     return 0
 
 
