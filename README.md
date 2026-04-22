@@ -96,6 +96,29 @@ footer) at [`docs/baseline_report_20x20.md`](docs/baseline_report_20x20.md).
 A 10×10 sanity-check baseline is also maintained at
 [`docs/baseline_report.md`](docs/baseline_report.md).
 
+![Head-to-head win-rate heatmap for the 20×20 baseline](docs/assets/h2h_heatmap.png)
+
+*Each cell is the row agent's win rate against the column opponent
+over 20 games (ties count against the row). Diagonals are masked.
+RAVE dominates the top row; Greedy/Random occupy the lower-left red
+zone. `curriculum_ref`'s middle row is the compute-asymmetry story
+in one picture — it beats Greedy and Random but not the
+compute-matched MCTS agents. Regenerate with
+`python scripts/render_h2h_heatmap.py`.*
+
+## How a game plays out
+
+![Territory-growth plot: RAVE@200 vs Greedy, 20×20, seed 0](docs/assets/territory_growth.png)
+
+*One deterministic RAVE@200 vs Greedy game at 20×20 (seed 0).
+**Top**: total territory (path + claimed) per player over time —
+mostly linear from one-path-cell-per-turn, with sharp jumps when
+an enclosure closes. **Bottom**: enclosed cells only, showing the
+discrete enclosure events that drive score. Greedy fires early
+(~turn 70, +21 cells) but RAVE's late enclosure (~turn 138, +46
+cells) is what decides the game. Regenerate with
+`python scripts/record_territory_growth.py --seed 0`.*
+
 ## Engine at a glance
 
 The simulation kernel is tuned to make tree-search viable at 200+
