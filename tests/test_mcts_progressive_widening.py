@@ -292,13 +292,27 @@ def test_pw_increases_max_depth_avg() -> None:
     than without. PW at opponent nodes initially hides most 4-way branches,
     so each rollout descends further down the surviving path. We average
     over 5 seeds to dampen per-seed noise; the check is strict per the spec.
+
+    Spawns are pinned explicitly so the test is hermetic to
+    `_default_spawns` changes — the signal being tested is "PW narrows
+    branching to deepen search," not "defaults pick particular cells."
     """
     iters = 400
     board_size = 10
+    # Close-spawn fixture (the `_default_spawns` output on 10x10 before
+    # the diagonally-adjacent clamp). Close spawns constrain branching
+    # early, which is where PW's deepen-by-narrowing effect is clearest
+    # at this iteration budget.
+    pinned_spawns = [(4, 4), (5, 5)]
     baseline_depths: list[int] = []
     pw_depths: list[int] = []
     for i in range(5):
-        state = new_game(board_size=board_size, num_players=2, seed=900 + i)
+        state = new_game(
+            board_size=board_size,
+            num_players=2,
+            seed=900 + i,
+            spawn_positions=pinned_spawns,
+        )
         baseline = UCTAgent(
             iterations=iters,
             rng=np.random.default_rng(1000 + i),
@@ -307,7 +321,12 @@ def test_pw_increases_max_depth_avg() -> None:
         baseline.select_action(state, 0)
         baseline_depths.append(int(baseline.last_search_stats["max_depth"]))
 
-        state2 = new_game(board_size=board_size, num_players=2, seed=900 + i)
+        state2 = new_game(
+            board_size=board_size,
+            num_players=2,
+            seed=900 + i,
+            spawn_positions=pinned_spawns,
+        )
         pw = UCTAgent(
             iterations=iters,
             rng=np.random.default_rng(1000 + i),
