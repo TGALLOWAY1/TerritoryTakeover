@@ -27,10 +27,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from territory_takeover.engine import new_game, step
 from territory_takeover.search.mcts.rave import RaveAgent
+from territory_takeover.viz import save_game_gif
 
 if TYPE_CHECKING:
     from territory_takeover.search.agent import Agent
+    from territory_takeover.state import GameState
 
 
 DEFAULT_CHECKPOINT = Path("docs/phase3d/net_reference.pt")
@@ -100,6 +103,58 @@ def build_roster(cfg: DemoConfig) -> list[Agent]:
     return [rave, az]
 
 
+def play_demo_game(roster: list[Agent], cfg: DemoConfig) -> list[GameState]:
+    """Play one full game and return the per-half-move trajectory.
+
+    The initial state is captured so the trajectory starts from an
+    empty board (minus spawns); each subsequent entry is a fresh
+    ``state.copy()`` after ``step`` is applied. Callers downsample by
+    ``cfg.frame_stride`` before rendering.
+    """
+    if len(roster) != cfg.num_players:
+        raise ValueError(
+            f"roster length {len(roster)} != num_players {cfg.num_players}"
+        )
+
+    ss = np.random.SeedSequence(cfg.seed)
+    game_seed_arr = ss.generate_state(1, dtype=np.uint32)
+    game_seed = int(game_seed_arr[0])
+
+    for agent in roster:
+        agent.reset()
+
+    state = new_game(
+        board_size=cfg.board_size,
+        num_players=cfg.num_players,
+        seed=game_seed,
+    )
+    trajectory: list[GameState] = [state.copy()]
+
+    while not state.done:
+        seat = state.current_player
+        action = roster[seat].select_action(state, seat)
+        step(state, action, strict=True)
+        trajectory.append(state.copy())
+
+    return trajectory
+
+
+def _downsample(trajectory: list[GameState], stride: int) -> list[GameState]:
+    """Keep every ``stride``-th frame plus the last frame (terminal state).
+
+    We always include the final frame so the GIF ends on the terminal
+    board, not one move short.
+    """
+    if stride < 1:
+        raise ValueError(f"stride must be >= 1; got {stride}")
+    if stride == 1:
+        return list(trajectory)
+    kept = trajectory[::stride]
+    if trajectory and trajectory[-1] is not kept[-1]:
+        kept.append(trajectory[-1])
+    return kept
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Record a deterministic demo game to an animated GIF."
@@ -164,9 +219,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {a.name}  ({type(a).__name__})")
         return 0
 
-    # Trajectory capture + GIF write are wired up in the next commit.
-    print("run: not yet implemented (use --dry-run for now)", file=sys.stderr)
-    return 2
+    roster = build_roster(cfg)
+    print(
+        f"[demo] roster={[a.name for a in roster]} "
+        f"board={cfg.board_size}x{cfg.board_size} seed={cfg.seed}"
+    )
+    trajectory = play_demo_game(roster, cfg)
+    print(
+        f"[demo] captured {len(trajectory)} frames "
+        f"(final winner_seat={trajectory[-1].winner})"
+    )
+    frames = _downsample(trajectory, cfg.frame_stride)
+    print(f"[demo] writing {len(frames)} frames at {cfg.fps} fps to {args.out}")
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    save_game_gif(frames, str(args.out), fps=cfg.fps)
+    return 0
 
 
 if __name__ == "__main__":
