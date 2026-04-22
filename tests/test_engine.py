@@ -103,6 +103,31 @@ def test_custom_board_size_default_spawns() -> None:
     assert heads == [(4, 4), (4, 15), (15, 4), (15, 15)]
 
 
+def test_default_spawns_never_adjacent() -> None:
+    """Regression for the `_default_spawns` clamp.
+
+    A fixed 4-cell inset placed 2-player 8x8 spawns at (4,4) and (3,3)
+    (diagonally adjacent, Manhattan distance 2) and 10x10 spawns at
+    (4,4) and (5,5) (same problem). The clamp in `_default_spawns`
+    guarantees every pair of default spawns is at least Manhattan
+    distance 3 apart for every supported (board_size, num_players)
+    pair from 6 upwards — the smallest distance a player can move
+    toward another spawn without immediately colliding on the next
+    ply.
+    """
+    for board_size in (6, 7, 8, 9, 10, 11, 12, 16, 20, 40):
+        for num_players in (2, 4):
+            state = new_game(board_size=board_size, num_players=num_players)
+            heads = [p.head for p in state.players]
+            for i, a in enumerate(heads):
+                for b in heads[i + 1:]:
+                    dist = abs(a[0] - b[0]) + abs(a[1] - b[1])
+                    assert dist >= 3, (
+                        f"board={board_size} np={num_players}: spawns {a} and "
+                        f"{b} only {dist} apart (want >= 3)"
+                    )
+
+
 def test_reset_restores_initial_state() -> None:
     state = new_game()
     # Mutate state to simulate mid-game progress.

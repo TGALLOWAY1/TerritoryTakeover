@@ -241,9 +241,11 @@ class TerritoryTakeoverEnv(gym.Env[dict[str, Any], int]):
             raise RuntimeError("render() called before reset()")
         if self.render_mode == "ansi":
             return repr(self._state)
-        if self.render_mode == "rgb_array":
-            return self._render_rgb()
-        raise NotImplementedError(f"render_mode={self.render_mode!r}")
+        # render_mode is validated against metadata["render_modes"] in
+        # __init__; the whitelist is ["ansi", "rgb_array"], so anything
+        # reaching this point must be "rgb_array".
+        assert self.render_mode == "rgb_array", self.render_mode
+        return self._render_rgb()
 
     def close(self) -> None:
         self._state = None
@@ -420,14 +422,15 @@ class MultiAgentEnv:
             raise RuntimeError("render() called before reset()")
         if self.render_mode == "ansi":
             return repr(self._state)
-        if self.render_mode == "rgb_array":
-            grid = self._state.grid
-            cell_size = 8
-            small = _RGB_PALETTE[grid.astype(np.intp)]
-            return np.repeat(
-                np.repeat(small, cell_size, axis=0), cell_size, axis=1
-            )
-        raise NotImplementedError(f"render_mode={self.render_mode!r}")
+        # render_mode is validated against metadata["render_modes"] in
+        # __init__; the whitelist is ["ansi", "rgb_array"].
+        assert self.render_mode == "rgb_array", self.render_mode
+        grid = self._state.grid
+        cell_size = 8
+        small = _RGB_PALETTE[grid.astype(np.intp)]
+        return np.repeat(
+            np.repeat(small, cell_size, axis=0), cell_size, axis=1
+        )
 
     def close(self) -> None:
         self._state = None

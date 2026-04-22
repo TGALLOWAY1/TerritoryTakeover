@@ -1,21 +1,74 @@
 # Territory Takeover
 
-A turn-based multi-agent grid-game engine with a full decision-systems
-AI stack — classical tree search (Random, Greedy, Max-N, Paranoid, UCT,
-RAVE) and modern RL (Tabular Q, PPO primitives, AlphaZero self-play,
-curriculum learning) — evaluated under one reproducible tournament
-harness.
+[![ci](https://github.com/TGALLOWAY1/TerritoryTakeover/actions/workflows/ci.yml/badge.svg)](https://github.com/TGALLOWAY1/TerritoryTakeover/actions/workflows/ci.yml)
+[![python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A decision-systems AI research platform. Six search and RL algorithms —
+UCT, RAVE, Max-N / Paranoid, Tabular Q, AlphaZero self-play, curriculum
+learning — are implemented against a shared turn-based multi-agent grid
+environment and benchmarked head-to-head under a seed-locked tournament
+harness with committed Wilson-CI leaderboards. The territory-control
+game is the testbed, not the product.
 
 The project is set up as a lab: a deterministic, testable simulation
 core at the bottom, a layered algorithm stack on top, and a benchmark
 suite that emits committed markdown reports every agent can be
 compared against.
 
+## Why this exists
+
+Comparing decision-systems algorithms honestly is surprisingly hard:
+many pub/blog comparisons are apples-to-oranges, non-reproducible, or
+benchmarked against whatever was most convenient rather than against
+a shared baseline. This project exists to show what disciplined
+algorithm comparison looks like end-to-end: a deterministic
+environment small enough to hold in your head, an engine tuned well
+enough that 200-simulation-per-move MCTS is cheap to run, a harness
+that turns "which agent is better" into a concrete Wilson-CI-bounded
+number, and a set of committed reports that any reviewer can
+regenerate from a single integer seed. The territory-control game is
+incidental — the point is the method.
+
+```
+        ┌──────────────────────┐
+        │ GameState (int8 grid)│
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐        ┌────────────────────────────┐
+        │     engine.step      ├───────▶│ detect_and_apply_enclosure │
+        └──────────┬───────────┘        └────────────────────────────┘
+                   ▼
+        ┌──────────────────────┐
+        │   search.harness     │   seed-locked, Wilson-CI tournaments
+        └──────────┬───────────┘
+                   ▼
+   ┌────────────────────────────────┐
+   │ classical search  │   RL stack │   Random / Greedy / Max-N /
+   │   (agents)        │   (agents) │   UCT / RAVE / Tabular Q /
+   └────────────────────────────────┘   AlphaZero / curriculum
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │  committed reports   │   docs/baseline_report*.md,
+        │  (markdown, in git)  │   docs/experiments/*.md
+        └──────────────────────┘
+```
+
 ![Demo: RAVE@200 vs curriculum_ref@4 at 20×20, seed 0 — 70 frames at 4 fps](docs/assets/demo.gif)
 
 *One deterministic 20×20 / 2-player game between RAVE (at 200 sims/move)
 and the curriculum AlphaZero reference checkpoint (at 4 PUCT iters).
 Regenerate with `python scripts/record_demo.py --seed 0`.*
+
+![Agent behavior gallery: Random / Greedy / UCT@200 / RAVE@200 self-play at turn 100, 20×20, seed 0](docs/assets/agent_gallery.png)
+
+*Same seed, same starting board, four agents — each playing both seats
+against itself. Random leaves jagged, fragmented paths with almost no
+claimed territory. One-ply Greedy already forms large enclosed pockets.
+UCT and RAVE produce longer, more deliberate paths and split the board
+into opposing regions with stable claimed zones. Regenerate with
+`python scripts/record_agent_gallery.py --seed 0`.*
 
 ## Headline result
 
@@ -31,10 +84,75 @@ against the win rate:
 | 4    | greedy         | 0.300    | [0.211, 0.408]  |
 | 5    | random         | 0.300    | [0.211, 0.408]  |
 
+*`curriculum_ref` runs at 4 PUCT iterations per move while UCT and
+RAVE run at 200 simulations — this is a compute-asymmetric snapshot,
+not a fair-compute comparison, and the curriculum checkpoint is
+out-of-distribution above 10×10 (trained on 6×6→8×8→10×10). See
+[`docs/experiments/20x20_hypothesis_test.md`](docs/experiments/20x20_hypothesis_test.md)
+for the scaling study that motivates this choice.*
+
 Full report (including the head-to-head matrix and reproducibility
 footer) at [`docs/baseline_report_20x20.md`](docs/baseline_report_20x20.md).
 A 10×10 sanity-check baseline is also maintained at
 [`docs/baseline_report.md`](docs/baseline_report.md).
+
+![Head-to-head win-rate heatmap for the 20×20 baseline](docs/assets/h2h_heatmap.png)
+
+*Each cell is the row agent's win rate against the column opponent
+over 20 games (ties count against the row). Diagonals are masked.
+RAVE dominates the top row; Greedy/Random occupy the lower-left red
+zone. `curriculum_ref`'s middle row is the compute-asymmetry story
+in one picture — it beats Greedy and Random but not the
+compute-matched MCTS agents. Regenerate with
+`python scripts/render_h2h_heatmap.py`.*
+
+## How a game plays out
+
+![Territory-growth plot: RAVE@200 vs Greedy, 20×20, seed 0](docs/assets/territory_growth.png)
+
+*One deterministic RAVE@200 vs Greedy game at 20×20 (seed 0).
+**Top**: total territory (path + claimed) per player over time —
+mostly linear from one-path-cell-per-turn, with sharp jumps when
+an enclosure closes. **Bottom**: enclosed cells only, showing the
+discrete enclosure events that drive score. Greedy fires early
+(~turn 70, +21 cells) but RAVE's late enclosure (~turn 138, +46
+cells) is what decides the game. Regenerate with
+`python scripts/record_territory_growth.py --seed 0`.*
+
+## Does more MCTS compute help?
+
+![MCTS scaling: UCT vs random on 10×10, win rate vs simulations/move with Wilson 95% CI](docs/assets/mcts_scaling.png)
+
+*Win rate of UCT vs uniform random on 10×10 as simulations per move
+scales from 10 to 1000 (10 games per point, Wilson 95% CI). At 10
+sims UCT is indistinguishable from chance; by 200 sims it wins ~80%
+of games. The small dip from 200→1000 is inside the CIs and reflects
+the small sample, not a regression — 10×10 has only ~100 cells to
+contest, and the 200-sim root already explores most promising first
+moves. Regenerate with `python scripts/record_mcts_scaling.py --seed 0`
+(tighter bars come from passing `--games 30`).*
+
+## Engine at a glance
+
+The simulation kernel is tuned to make tree-search viable at 200+
+MCTS simulations per move on 20×20 boards without reaching for
+compiled extensions (numpy is the only runtime dependency). Measured
+hot-path targets, documented in [`CLAUDE.md`](CLAUDE.md) and checked
+against the benchmarks in [`benchmarks/`](benchmarks/):
+
+| Operation                                     | Target    |
+|-----------------------------------------------|-----------|
+| `GameState.copy()` (for MCTS tree expansion)  | < 50 µs   |
+| `legal_actions()` (per move on the hot path)  | < 1 µs    |
+| `detect_and_apply_enclosure` on 40×40         | < 200 µs  |
+
+These numbers drive the implementation choices: a single int8 grid as
+the source of truth, `memcpy`-friendly state copies, a boundary BFS
+with a reusable scratch buffer and a monotonic stamp instead of
+per-call allocation, and `grid.item(r, c)` in the hot path to dodge
+the `grid[r, c]` boxing overhead. See
+[`docs/OPTIMIZATION_ANALYSIS.md`](docs/OPTIMIZATION_ANALYSIS.md) for
+the full cost-breakdown.
 
 ## What's in the box
 
@@ -141,6 +259,10 @@ Phase-level research narrative:
 
 - [`KEY_FINDINGS.md`](KEY_FINDINGS.md) — running lab notebook (Phase 3a / 3c / 3d).
 - [`PHASE3_SUMMARY.md`](PHASE3_SUMMARY.md) — cross-phase synthesis + deferrals.
+- [`docs/phase3a/`](docs/phase3a/) — Phase-3a game-state screenshots
+  (8×8 2-player and 10×10 4-player boards across `vs_random`,
+  `vs_greedy`, `vs_uct` matchups) plus per-seed `eval_curves.csv` and
+  `summary.yaml` artifacts from the tabular-Q-learning baseline.
 
 Performance engineering:
 
