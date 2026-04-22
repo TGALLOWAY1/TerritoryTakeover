@@ -81,3 +81,79 @@ pytest             # 369 tests across 42 files (~8k LOC)
 ruff check .
 mypy               # strict mode, configured in pyproject.toml
 ```
+
+## Reproducibility
+
+The tournament harness derives every per-game seed and every per-agent
+RNG from a single root integer via `numpy.random.SeedSequence`'s spawn
+tree. Serial and multiprocessing runs from the same seed produce
+bit-identical game logs (see
+[`search/harness.py::run_match`](src/territory_takeover/search/harness.py)).
+
+To regenerate the committed benchmark reports from scratch:
+
+```
+# 20x20 canonical leaderboard (the headline above) — ~30 min on 16 cores
+python scripts/run_baseline_report.py \
+    --board-size 20 --games-per-pair 20 --parallel --seed 0
+
+# 10x10 sanity-check baseline — ~15 min serial
+python scripts/run_baseline_report.py --games-per-pair 40 --seed 0
+
+# Curriculum PUCT scaling sweep (H(a) vs H(b) test at 20x20)
+python scripts/run_puct_scaling.py \
+    --board-size 20 --games-per-opponent 10 \
+    --az-iters 4 16 64 --uct-iterations 100 --parallel --seed 0
+```
+
+Reference curriculum checkpoint at
+[`docs/phase3d/net_reference.pt`](docs/phase3d/net_reference.pt); its
+training config is mirrored at
+[`docs/phase3d/reference_config.yaml`](docs/phase3d/reference_config.yaml).
+
+## Further reading
+
+Architecture and conventions:
+
+- [`CLAUDE.md`](CLAUDE.md) — tile encoding, state split, engine entry
+  points, performance targets, coding conventions.
+
+Benchmark reports (committed markdown tables):
+
+- [`docs/baseline_report_20x20.md`](docs/baseline_report_20x20.md) — headline 20×20 leaderboard.
+- [`docs/baseline_report.md`](docs/baseline_report.md) — 10×10 sanity-check baseline.
+- [`docs/curriculum_puct_scaling.md`](docs/curriculum_puct_scaling.md) — curriculum scaling sweep.
+
+Experiment writeups:
+
+- [`docs/experiments/20x20_hypothesis_test.md`](docs/experiments/20x20_hypothesis_test.md) — H(a) vs H(b) study on curriculum scaling.
+
+Phase-level research narrative:
+
+- [`KEY_FINDINGS.md`](KEY_FINDINGS.md) — running lab notebook (Phase 3a / 3c / 3d).
+- [`PHASE3_SUMMARY.md`](PHASE3_SUMMARY.md) — cross-phase synthesis + deferrals.
+
+Performance engineering:
+
+- [`docs/OPTIMIZATION_ANALYSIS.md`](docs/OPTIMIZATION_ANALYSIS.md) — hotspot / cost-breakdown analysis.
+- [`benchmarks/OPTIMIZATION_REPORT.md`](benchmarks/OPTIMIZATION_REPORT.md) — before/after optimization writeup.
+- [`benchmarks/TUNING_FINDINGS.md`](benchmarks/TUNING_FINDINGS.md), [`benchmarks/HARNESS_FINDINGS.md`](benchmarks/HARNESS_FINDINGS.md), [`benchmarks/ROLLOUT_FINDINGS.md`](benchmarks/ROLLOUT_FINDINGS.md) — subsystem-specific perf notes.
+
+## Known limitations and open questions
+
+- **AlphaZero snapshot-gating is stubbed** (`rl/alphazero/train.py:12-14`,
+  `:207-209`). The latest self-play snapshot always becomes the
+  self-play champion. This was a deliberate Phase-3c scope cut; the
+  20×20 study in `docs/experiments/20x20_hypothesis_test.md` argues
+  that value-head quality is the pipeline's weakest link and motivates
+  finishing the gating tournament with that remit.
+- **Curriculum checkpoint is out-of-distribution above 10×10.** It was
+  trained on a 6×6 → 8×8 → 10×10 schedule. Its `head_type=conv`
+  architecture accepts arbitrary `H×W` but strength does not scale
+  monotonically with eval-time PUCT compute at 20×20 — see the writeup
+  for the evidence.
+- **No automated benchmark CI.** The baseline reports are run locally
+  and checked into `docs/`; re-running on every PR would be expensive
+  and flaky on shared runners. Reproducibility is provided via the
+  commands above plus the seed-locked harness, not CI.
+
