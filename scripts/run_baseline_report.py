@@ -21,6 +21,8 @@ with the four classical agents only.
 from __future__ import annotations
 
 import argparse
+import csv
+import itertools
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +30,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from territory_takeover.search.harness import (
+    AgentStats,
+    GameLog,
+    _aggregate,
+    _wilson_ci,
+    run_match,
+)
 from territory_takeover.search.mcts.rave import RaveAgent
 from territory_takeover.search.mcts.uct import UCTAgent
 from territory_takeover.search.random_agent import HeuristicGreedyAgent, UniformRandomAgent
@@ -123,6 +132,172 @@ def build_roster(cfg: RosterConfig) -> list[Agent]:
     return agents
 
 
+@dataclass(frozen=True, slots=True)
+class RunConfig:
+    """Knobs for the tournament run proper."""
+
+    games_per_pair: int = 40
+    board_size: int = 10
+    num_players: int = 2
+    seed: int = 0
+    parallel: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PairAggregate:
+    """One row of the per-pair leaderboard.
+
+    Wins are counted from ``agent_a``'s perspective; ``win_rate_a`` is
+    ``wins_a / games`` (ties count against the win rate as the audit
+    calls for). ``ci_low``/``ci_high`` are the Wilson 95% interval.
+    """
+
+    agent_a: str
+    agent_b: str
+    games: int
+    wins_a: int
+    wins_b: int
+    ties: int
+    win_rate_a: float
+    ci_low: float
+    ci_high: float
+
+
+@dataclass(frozen=True, slots=True)
+class BaselineResult:
+    """Full result of a :func:`run_all_pairs` run — what the emitters consume."""
+
+    board_size: int
+    num_players: int
+    games_per_pair: int
+    seed: int
+    pairs: list[PairAggregate]
+    per_agent: list[AgentStats]
+
+
+def run_all_pairs(roster: list[Agent], cfg: RunConfig) -> BaselineResult:
+    """Play every unordered pair in the roster head-to-head via :func:`run_match`.
+
+    Each pair gets its own child :class:`SeedSequence` derived from
+    ``cfg.seed``, so any single pair can be re-run independently with the
+    same seed and produce bit-identical games.
+
+    ``cfg.games_per_pair`` must be a multiple of ``2`` so that
+    ``swap_seats=True`` can rotate seats evenly between the two agents.
+    """
+    if cfg.games_per_pair < 0:
+        raise ValueError(
+            f"games_per_pair must be >= 0; got {cfg.games_per_pair}"
+        )
+    if cfg.games_per_pair % 2 != 0:
+        raise ValueError(
+            "games_per_pair must be a multiple of 2 so seat rotation is "
+            f"balanced across the two seats; got {cfg.games_per_pair}"
+        )
+    if len(roster) < 2:
+        raise ValueError("roster must contain at least 2 agents")
+    if cfg.num_players != 2:
+        raise ValueError(
+            f"run_all_pairs currently supports num_players=2 only; "
+            f"got {cfg.num_players}"
+        )
+
+    pairs_idx = list(itertools.combinations(range(len(roster)), 2))
+    pair_ss = np.random.SeedSequence(cfg.seed)
+    pair_seqs = pair_ss.spawn(len(pairs_idx))
+
+    aggregates: list[PairAggregate] = []
+    all_games: list[GameLog] = []
+
+    for pi, (ai, bi) in enumerate(pairs_idx):
+        agent_a = roster[ai]
+        agent_b = roster[bi]
+        pair_seed = int(pair_seqs[pi].generate_state(1, dtype=np.uint32)[0])
+
+        result = run_match(
+            agents=[agent_a, agent_b],
+            num_games=cfg.games_per_pair,
+            board_size=cfg.board_size,
+            swap_seats=True,
+            seed=pair_seed,
+            parallel=cfg.parallel,
+            num_players=cfg.num_players,
+        )
+
+        wins_a = 0
+        wins_b = 0
+        ties = 0
+        for g in result.games:
+            a_seat = g.seat_assignment.index(agent_a.name)
+            if g.winner_seat is None:
+                ties += 1
+            elif g.winner_seat == a_seat:
+                wins_a += 1
+            else:
+                wins_b += 1
+
+        win_rate_a = wins_a / cfg.games_per_pair if cfg.games_per_pair > 0 else 0.0
+        ci_low, ci_high = _wilson_ci(wins_a, cfg.games_per_pair)
+        aggregates.append(
+            PairAggregate(
+                agent_a=agent_a.name,
+                agent_b=agent_b.name,
+                games=cfg.games_per_pair,
+                wins_a=wins_a,
+                wins_b=wins_b,
+                ties=ties,
+                win_rate_a=win_rate_a,
+                ci_low=ci_low,
+                ci_high=ci_high,
+            )
+        )
+        all_games.extend(result.games)
+
+    per_agent = _aggregate([a.name for a in roster], all_games)
+    return BaselineResult(
+        board_size=cfg.board_size,
+        num_players=cfg.num_players,
+        games_per_pair=cfg.games_per_pair,
+        seed=cfg.seed,
+        pairs=aggregates,
+        per_agent=per_agent,
+    )
+
+
+def write_pair_csv(path: Path, result: BaselineResult) -> None:
+    """Flatten ``result.pairs`` to a per-pair CSV with a stable schema."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "agent_a",
+                "agent_b",
+                "games",
+                "wins_a",
+                "wins_b",
+                "ties",
+                "win_rate_a",
+                "ci_low",
+                "ci_high",
+            ]
+        )
+        for r in result.pairs:
+            w.writerow(
+                [
+                    r.agent_a,
+                    r.agent_b,
+                    r.games,
+                    r.wins_a,
+                    r.wins_b,
+                    r.ties,
+                    f"{r.win_rate_a:.6f}",
+                    f"{r.ci_low:.6f}",
+                    f"{r.ci_high:.6f}",
+                ]
+            )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Run the canonical Territory Takeover baseline report."
@@ -179,6 +354,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Output path for the flat per-pair CSV.",
     )
     p.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Dispatch games across a multiprocessing pool.",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         help="Build the roster and print names/params, then exit.",
@@ -212,9 +392,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {a.name}  ({type(a).__name__})")
         return 0
 
-    # Running the actual tournament is wired up in the next commit.
-    print("run: not yet implemented (use --dry-run for now)", file=sys.stderr)
-    return 2
+    run_cfg = RunConfig(
+        games_per_pair=args.games_per_pair,
+        board_size=args.board_size,
+        num_players=2,
+        seed=args.seed,
+        parallel=args.parallel,
+    )
+    roster = build_roster(cfg)
+    print(
+        f"[baseline] roster={[a.name for a in roster]} "
+        f"board={run_cfg.board_size}x{run_cfg.board_size} "
+        f"games_per_pair={run_cfg.games_per_pair} seed={run_cfg.seed}"
+    )
+    result = run_all_pairs(roster, run_cfg)
+    write_pair_csv(args.csv_out, result)
+    print(f"[baseline] wrote {args.csv_out}")
+
+    # Markdown emitter lands in the next commit.
+    return 0
 
 
 if __name__ == "__main__":

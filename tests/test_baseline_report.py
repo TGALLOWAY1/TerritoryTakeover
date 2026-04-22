@@ -64,7 +64,82 @@ def test_dry_run_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
         assert f"- {name}" in out
 
 
-def test_non_dry_run_without_logic_returns_nonzero() -> None:
-    """Until the tournament runner lands, main() without --dry-run must exit non-zero."""
-    rc = rbr.main(["--skip-curriculum"])
-    assert rc != 0
+def test_run_all_pairs_two_random_agents(tmp_path: Path) -> None:
+    """Two Random agents, 4 games: wins + ties + losses from each perspective must balance."""
+    cfg = rbr.RosterConfig(seed=0, skip_curriculum=True)
+    full = rbr.build_roster(cfg)
+    roster = full[:2]  # random, greedy
+
+    run_cfg = rbr.RunConfig(games_per_pair=4, board_size=8, seed=0)
+    result = rbr.run_all_pairs(roster, run_cfg)
+
+    assert len(result.pairs) == 1
+    pair = result.pairs[0]
+    assert pair.games == 4
+    assert pair.wins_a + pair.wins_b + pair.ties == 4
+    assert 0.0 <= pair.ci_low <= pair.win_rate_a <= pair.ci_high <= 1.0
+    assert pair.agent_a == "random"
+    assert pair.agent_b == "greedy"
+
+    csv_path = tmp_path / "pairs.csv"
+    rbr.write_pair_csv(csv_path, result)
+    assert csv_path.exists()
+    lines = csv_path.read_text().splitlines()
+    assert lines[0].startswith("agent_a,agent_b,games")
+    assert lines[1].startswith("random,greedy,4,")
+
+
+def test_run_all_pairs_is_deterministic_on_seed() -> None:
+    cfg = rbr.RosterConfig(seed=0, skip_curriculum=True)
+    roster_a = rbr.build_roster(cfg)[:2]
+    roster_b = rbr.build_roster(cfg)[:2]
+
+    run_cfg = rbr.RunConfig(games_per_pair=4, board_size=8, seed=7)
+    ra = rbr.run_all_pairs(roster_a, run_cfg)
+    rb = rbr.run_all_pairs(roster_b, run_cfg)
+    assert ra.pairs[0].wins_a == rb.pairs[0].wins_a
+    assert ra.pairs[0].wins_b == rb.pairs[0].wins_b
+    assert ra.pairs[0].ties == rb.pairs[0].ties
+
+
+def test_run_all_pairs_rejects_odd_games_per_pair() -> None:
+    cfg = rbr.RosterConfig(seed=0, skip_curriculum=True)
+    roster = rbr.build_roster(cfg)[:2]
+    bad_cfg = rbr.RunConfig(games_per_pair=3, board_size=8)
+    with pytest.raises(ValueError, match="multiple of 2"):
+        rbr.run_all_pairs(roster, bad_cfg)
+
+
+def test_run_all_pairs_rejects_singleton_roster() -> None:
+    cfg = rbr.RosterConfig(seed=0, skip_curriculum=True)
+    roster = rbr.build_roster(cfg)[:1]
+    with pytest.raises(ValueError, match="at least 2"):
+        rbr.run_all_pairs(roster, rbr.RunConfig(games_per_pair=2, board_size=8))
+
+
+def test_main_writes_csv_on_small_run(tmp_path: Path) -> None:
+    csv_out = tmp_path / "pairs.csv"
+    rc = rbr.main(
+        [
+            "--skip-curriculum",
+            "--games-per-pair",
+            "2",
+            "--board-size",
+            "8",
+            "--seed",
+            "0",
+            "--uct-iterations",
+            "4",
+            "--rave-iterations",
+            "4",
+            "--csv-out",
+            str(csv_out),
+            "--md-out",
+            str(tmp_path / "report.md"),
+        ]
+    )
+    assert rc == 0
+    assert csv_out.exists()
+    lines = csv_out.read_text().splitlines()
+    # 4 classical agents => 6 unique pairs => 6 data rows + 1 header.
+    assert len(lines) == 7
