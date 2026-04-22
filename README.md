@@ -11,6 +11,12 @@ core at the bottom, a layered algorithm stack on top, and a benchmark
 suite that emits committed markdown reports every agent can be
 compared against.
 
+![Demo: RAVE@200 vs curriculum_ref@4 at 20×20, seed 0 — 70 frames at 4 fps](docs/assets/demo.gif)
+
+*One deterministic 20×20 / 2-player game between RAVE (at 200 sims/move)
+and the curriculum AlphaZero reference checkpoint (at 4 PUCT iters).
+Regenerate with `python scripts/record_demo.py --seed 0`.*
+
 ## Headline result
 
 5-way round-robin head-to-head at 20×20 / 2 players, 20 games per pair
