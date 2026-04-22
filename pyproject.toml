@@ -5,9 +5,37 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "territory_takeover"
 version = "0.1.0"
-description = "Grid-based territory capture game engine."
+description = "Multi-agent grid-game engine and decision-systems AI lab (classical search, AlphaZero, reproducible tournament harness)."
+readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "TJ Galloway", email = "30303176+TGALLOWAY1@users.noreply.github.com" },
+]
+keywords = [
+    "reinforcement-learning",
+    "multi-agent",
+    "monte-carlo-tree-search",
+    "alphazero",
+    "game-engine",
+    "benchmarking",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = ["numpy>=1.26"]
+
+[project.urls]
+Homepage = "https://github.com/TGALLOWAY1/TerritoryTakeover"
+Repository = "https://github.com/TGALLOWAY1/TerritoryTakeover"
+Issues = "https://github.com/TGALLOWAY1/TerritoryTakeover/issues"
 
 [project.optional-dependencies]
 gym = ["gymnasium>=0.29"]
