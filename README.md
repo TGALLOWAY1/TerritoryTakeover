@@ -119,6 +119,19 @@ discrete enclosure events that drive score. Greedy fires early
 cells) is what decides the game. Regenerate with
 `python scripts/record_territory_growth.py --seed 0`.*
 
+## Does more MCTS compute help?
+
+![MCTS scaling: UCT vs random on 10×10, win rate vs simulations/move with Wilson 95% CI](docs/assets/mcts_scaling.png)
+
+*Win rate of UCT vs uniform random on 10×10 as simulations per move
+scales from 10 to 1000 (10 games per point, Wilson 95% CI). At 10
+sims UCT is indistinguishable from chance; by 200 sims it wins ~80%
+of games. The small dip from 200→1000 is inside the CIs and reflects
+the small sample, not a regression — 10×10 has only ~100 cells to
+contest, and the 200-sim root already explores most promising first
+moves. Regenerate with `python scripts/record_mcts_scaling.py --seed 0`
+(tighter bars come from passing `--games 30`).*
+
 ## Engine at a glance
 
 The simulation kernel is tuned to make tree-search viable at 200+
