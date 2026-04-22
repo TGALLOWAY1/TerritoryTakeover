@@ -48,8 +48,11 @@ def _make_state(
 
 
 def test_single_legal_step_advances_turn() -> None:
-    state = new_game(board_size=5, num_players=2)
-    # Player 0 spawns at (4, 4) on a 5x5 (inset=4). Move N (action=0) to (3, 4).
+    # Pin spawns explicitly so the test is hermetic to `_default_spawns`.
+    state = new_game(
+        board_size=5, num_players=2, spawn_positions=[(4, 4), (0, 0)]
+    )
+    # Player 0 at (4, 4). Move N (action=0) to (3, 4).
     assert state.players[0].head == (4, 4)
 
     result = step(state, 0)

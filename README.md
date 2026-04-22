@@ -16,6 +16,45 @@ core at the bottom, a layered algorithm stack on top, and a benchmark
 suite that emits committed markdown reports every agent can be
 compared against.
 
+## Why this exists
+
+Comparing decision-systems algorithms honestly is surprisingly hard:
+many pub/blog comparisons are apples-to-oranges, non-reproducible, or
+benchmarked against whatever was most convenient rather than against
+a shared baseline. This project exists to show what disciplined
+algorithm comparison looks like end-to-end: a deterministic
+environment small enough to hold in your head, an engine tuned well
+enough that 200-simulation-per-move MCTS is cheap to run, a harness
+that turns "which agent is better" into a concrete Wilson-CI-bounded
+number, and a set of committed reports that any reviewer can
+regenerate from a single integer seed. The territory-control game is
+incidental — the point is the method.
+
+```
+        ┌──────────────────────┐
+        │ GameState (int8 grid)│
+        └──────────┬───────────┘
+                   ▼
+        ┌──────────────────────┐        ┌────────────────────────────┐
+        │     engine.step      ├───────▶│ detect_and_apply_enclosure │
+        └──────────┬───────────┘        └────────────────────────────┘
+                   ▼
+        ┌──────────────────────┐
+        │   search.harness     │   seed-locked, Wilson-CI tournaments
+        └──────────┬───────────┘
+                   ▼
+   ┌────────────────────────────────┐
+   │ classical search  │   RL stack │   Random / Greedy / Max-N /
+   │   (agents)        │   (agents) │   UCT / RAVE / Tabular Q /
+   └────────────────────────────────┘   AlphaZero / curriculum
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │  committed reports   │   docs/baseline_report*.md,
+        │  (markdown, in git)  │   docs/experiments/*.md
+        └──────────────────────┘
+```
+
 ![Demo: RAVE@200 vs curriculum_ref@4 at 20×20, seed 0 — 70 frames at 4 fps](docs/assets/demo.gif)
 
 *One deterministic 20×20 / 2-player game between RAVE (at 200 sims/move)
@@ -56,6 +95,28 @@ Full report (including the head-to-head matrix and reproducibility
 footer) at [`docs/baseline_report_20x20.md`](docs/baseline_report_20x20.md).
 A 10×10 sanity-check baseline is also maintained at
 [`docs/baseline_report.md`](docs/baseline_report.md).
+
+## Engine at a glance
+
+The simulation kernel is tuned to make tree-search viable at 200+
+MCTS simulations per move on 20×20 boards without reaching for
+compiled extensions (numpy is the only runtime dependency). Measured
+hot-path targets, documented in [`CLAUDE.md`](CLAUDE.md) and checked
+against the benchmarks in [`benchmarks/`](benchmarks/):
+
+| Operation                                     | Target    |
+|-----------------------------------------------|-----------|
+| `GameState.copy()` (for MCTS tree expansion)  | < 50 µs   |
+| `legal_actions()` (per move on the hot path)  | < 1 µs    |
+| `detect_and_apply_enclosure` on 40×40         | < 200 µs  |
+
+These numbers drive the implementation choices: a single int8 grid as
+the source of truth, `memcpy`-friendly state copies, a boundary BFS
+with a reusable scratch buffer and a monotonic stamp instead of
+per-call allocation, and `grid.item(r, c)` in the hot path to dodge
+the `grid[r, c]` boxing overhead. See
+[`docs/OPTIMIZATION_ANALYSIS.md`](docs/OPTIMIZATION_ANALYSIS.md) for
+the full cost-breakdown.
 
 ## What's in the box
 
@@ -162,6 +223,10 @@ Phase-level research narrative:
 
 - [`KEY_FINDINGS.md`](KEY_FINDINGS.md) — running lab notebook (Phase 3a / 3c / 3d).
 - [`PHASE3_SUMMARY.md`](PHASE3_SUMMARY.md) — cross-phase synthesis + deferrals.
+- [`docs/phase3a/`](docs/phase3a/) — Phase-3a game-state screenshots
+  (8×8 2-player and 10×10 4-player boards across `vs_random`,
+  `vs_greedy`, `vs_uct` matchups) plus per-seed `eval_curves.csv` and
+  `summary.yaml` artifacts from the tabular-Q-learning baseline.
 
 Performance engineering:
 

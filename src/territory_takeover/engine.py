@@ -37,10 +37,18 @@ class StepResult:
 def _default_spawns(board_size: int, num_players: int) -> list[tuple[int, int]]:
     """Canonical symmetric spawns defined for 2- and 4-player games.
 
-    4 players: all four corners inset by `_SPAWN_INSET`.
+    4 players: all four corners inset by the effective inset.
     2 players: diagonal corners (top-left, bottom-right).
+
+    ``_SPAWN_INSET`` (4) is the canonical inset for the 20x20 benchmark
+    board. On boards small enough that a 4-cell inset would place
+    spawns on top of each other (or diagonally adjacent, as happened
+    for ``board_size <= 10``), the effective inset is clamped so the
+    opposite-corner pair is separated by at least roughly half the
+    board. This preserves 20x20 / 40x40 behavior while fixing the
+    pathological 8x8 and 10x10 cases.
     """
-    inset = _SPAWN_INSET
+    inset = min(_SPAWN_INSET, max(0, (board_size - 4) // 2))
     far = board_size - 1 - inset
     if num_players == 4:
         return [(inset, inset), (inset, far), (far, inset), (far, far)]
