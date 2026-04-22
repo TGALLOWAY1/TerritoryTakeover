@@ -117,6 +117,9 @@ Architecture and conventions:
 
 - [`CLAUDE.md`](CLAUDE.md) — tile encoding, state split, engine entry
   points, performance targets, coding conventions.
+- [`docs/adr/`](docs/adr/) — architecture decision records (6 initial
+  ADRs: int8 grid encoding, state split, enclosure BFS, value-target
+  choice, AlphaZero gating deferral, reproducibility).
 
 Benchmark reports (committed markdown tables):
 

@@ -205,8 +205,9 @@ def train_loop(
             )
 
             # TODO: gating tournament — compare latest snapshot to the
-            # current champion before promoting. Out of scope for the
-            # reduced Phase 3c cadence.
+            # current champion before promoting. Deferred deliberately;
+            # see docs/adr/ADR-005-alphazero-gating.md for scope and
+            # motivated follow-up (value-head accuracy gating).
 
             losses = {"policy_loss": 0.0, "value_loss": 0.0, "l2_loss": 0.0, "total_loss": 0.0}
             for _ in range(train_cfg.train_steps_per_iteration):
