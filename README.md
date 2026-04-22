@@ -1,10 +1,15 @@
 # Territory Takeover
 
-A turn-based multi-agent grid-game engine with a full decision-systems
-AI stack — classical tree search (Random, Greedy, Max-N, Paranoid, UCT,
-RAVE) and modern RL (Tabular Q, PPO primitives, AlphaZero self-play,
-curriculum learning) — evaluated under one reproducible tournament
-harness.
+[![ci](https://github.com/TGALLOWAY1/TerritoryTakeover/actions/workflows/ci.yml/badge.svg)](https://github.com/TGALLOWAY1/TerritoryTakeover/actions/workflows/ci.yml)
+[![python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+A decision-systems AI research platform. Six search and RL algorithms —
+UCT, RAVE, Max-N / Paranoid, Tabular Q, AlphaZero self-play, curriculum
+learning — are implemented against a shared turn-based multi-agent grid
+environment and benchmarked head-to-head under a seed-locked tournament
+harness with committed Wilson-CI leaderboards. The territory-control
+game is the testbed, not the product.
 
 The project is set up as a lab: a deterministic, testable simulation
 core at the bottom, a layered algorithm stack on top, and a benchmark
@@ -16,6 +21,15 @@ compared against.
 *One deterministic 20×20 / 2-player game between RAVE (at 200 sims/move)
 and the curriculum AlphaZero reference checkpoint (at 4 PUCT iters).
 Regenerate with `python scripts/record_demo.py --seed 0`.*
+
+![Agent behavior gallery: Random / Greedy / UCT@200 / RAVE@200 self-play at turn 100, 20×20, seed 0](docs/assets/agent_gallery.png)
+
+*Same seed, same starting board, four agents — each playing both seats
+against itself. Random leaves jagged, fragmented paths with almost no
+claimed territory. One-ply Greedy already forms large enclosed pockets.
+UCT and RAVE produce longer, more deliberate paths and split the board
+into opposing regions with stable claimed zones. Regenerate with
+`python scripts/record_agent_gallery.py --seed 0`.*
 
 ## Headline result
 
@@ -30,6 +44,13 @@ against the win rate:
 | 3    | curriculum_ref | 0.412    | [0.311, 0.522]  |
 | 4    | greedy         | 0.300    | [0.211, 0.408]  |
 | 5    | random         | 0.300    | [0.211, 0.408]  |
+
+*`curriculum_ref` runs at 4 PUCT iterations per move while UCT and
+RAVE run at 200 simulations — this is a compute-asymmetric snapshot,
+not a fair-compute comparison, and the curriculum checkpoint is
+out-of-distribution above 10×10 (trained on 6×6→8×8→10×10). See
+[`docs/experiments/20x20_hypothesis_test.md`](docs/experiments/20x20_hypothesis_test.md)
+for the scaling study that motivates this choice.*
 
 Full report (including the head-to-head matrix and reproducibility
 footer) at [`docs/baseline_report_20x20.md`](docs/baseline_report_20x20.md).
