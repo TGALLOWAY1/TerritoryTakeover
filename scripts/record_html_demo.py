@@ -71,6 +71,7 @@ def _build_alphazero_agent(
     num_players: int,
     iterations: int,
     seed: int,
+    name: str,
 ) -> Agent:
     """Load the reference AlphaZero checkpoint. Deferred torch import."""
     from territory_takeover.rl.alphazero.mcts import AlphaZeroAgent
@@ -94,7 +95,7 @@ def _build_alphazero_agent(
         iterations=iterations,
         c_puct=1.25,
         device="cpu",
-        name="alphazero",
+        name=name,
         seed=seed,
     )
 
@@ -103,21 +104,21 @@ def _build_agent(
     key: str,
     seed: int,
     args: argparse.Namespace,
+    name_override: str | None = None,
 ) -> Agent:
+    """Build one agent. ``name_override`` wins over the default ``key`` name so
+    callers can align the rendered label with an external table (e.g. Elo CSV
+    rows like ``curriculum_seed0``).
+    """
+    name = name_override if name_override else key
     if key == "random":
-        return UniformRandomAgent(
-            rng=np.random.default_rng(seed),
-            name="random",
-        )
+        return UniformRandomAgent(rng=np.random.default_rng(seed), name=name)
     if key == "greedy":
-        return HeuristicGreedyAgent(
-            rng=np.random.default_rng(seed),
-            name="greedy",
-        )
+        return HeuristicGreedyAgent(rng=np.random.default_rng(seed), name=name)
     if key == "rave":
         return RaveAgent(
             iterations=args.rave_iterations,
-            name="rave",
+            name=name,
             rng=np.random.default_rng(seed),
         )
     if key == "alphazero":
@@ -127,6 +128,7 @@ def _build_agent(
             num_players=args.num_players,
             iterations=args.az_iterations,
             seed=seed,
+            name=name,
         )
     raise ValueError(f"Unknown agent key {key!r}; choose from {AGENT_KEYS}")
 
@@ -153,7 +155,10 @@ def _build_nn_evaluator(args: argparse.Namespace) -> NNEvaluator:
     )
     net = AlphaZeroNet(cfg)
     ckpt = torch.load(str(args.checkpoint), map_location="cpu", weights_only=False)
-    state_dict = ckpt.get("net") if isinstance(ckpt, dict) else ckpt
+    # Checkpoints in-tree are saved as bare state_dicts (see
+    # ``AlphaZeroAgent.from_checkpoint``); some external runs wrap them in a
+    # ``{"net": ...}`` dict, so handle both shapes.
+    state_dict = ckpt["net"] if isinstance(ckpt, dict) and "net" in ckpt else ckpt
     net.load_state_dict(state_dict)
     net.eval()
     return NNEvaluator(net, device="cpu", batch_size=1)
@@ -240,6 +245,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--seat1", choices=AGENT_KEYS, default="greedy")
     p.add_argument("--seat2", choices=AGENT_KEYS, default="greedy")
     p.add_argument("--seat3", choices=AGENT_KEYS, default="random")
+    for seat in range(4):
+        p.add_argument(
+            f"--name{seat}",
+            type=str,
+            default=None,
+            help=f"Display name for seat {seat} (defaults to the agent key). "
+            f"Use the canonical Elo-CSV name to pull in the rating, "
+            f"e.g. 'curriculum_seed0'.",
+        )
     p.add_argument("--rave-iterations", type=int, default=200)
     p.add_argument("--az-iterations", type=int, default=16)
     p.add_argument(
@@ -282,10 +296,16 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
     seat_keys = [args.seat0, args.seat1, args.seat2, args.seat3][: args.num_players]
+    seat_names = [args.name0, args.name1, args.name2, args.name3][: args.num_players]
     ss = np.random.SeedSequence(args.seed)
     agent_seeds = ss.generate_state(args.num_players + 1, dtype=np.uint32)
     agents = [
-        _build_agent(key, seed=int(agent_seeds[i]), args=args)
+        _build_agent(
+            key,
+            seed=int(agent_seeds[i]),
+            args=args,
+            name_override=seat_names[i],
+        )
         for i, key in enumerate(seat_keys)
     ]
 
