@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Greedy (Elo 33.0) vs curriculum_seed0 AlphaZero (Elo 22.0) — 10x10, seed 0</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115;
+    color: #e6e6e6;
+  }
+  .wrap { display: flex; flex-wrap: wrap; gap: 24px; padding: 24px; }
+  .board-col { flex: 1 1 420px; min-width: 360px; }
+  .side-col { flex: 1 1 320px; min-width: 300px; max-width: 480px; }
+  h1 { font-size: 20px; margin: 0 0 12px; letter-spacing: 0.3px; }
+  .meta { font-size: 12px; color: #9aa0a6; margin-bottom: 12px; }
+  canvas {
+    width: 100%;
+    height: auto;
+    background: #1a1d23;
+    border: 1px solid #2a2f38;
+    border-radius: 6px;
+    image-rendering: pixelated;
+  }
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  button {
+    background: #2a2f38;
+    color: #e6e6e6;
+    border: 1px solid #3a4049;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button:hover { background: #353b45; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  input[type=range] { flex: 1 1 200px; }
+  label { font-size: 12px; color: #9aa0a6; }
+  .turn-readout { font-size: 12px; color: #c4c7cc; min-width: 110px; }
+  .agent-card {
+    background: #1a1d23;
+    border: 1px solid #2a2f38;
+    border-left-width: 6px;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .agent-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .agent-name { font-weight: 600; font-size: 14px; }
+  .agent-strategy {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #9aa0a6;
+  }
+  .agent-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px 8px;
+    font-size: 12px;
+    margin-top: 6px;
+    color: #c4c7cc;
+  }
+  .agent-stats .k { color: #9aa0a6; font-size: 11px; }
+  .prob-bar {
+    margin-top: 8px;
+    height: 14px;
+    background: #2a2f38;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+  .prob-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 240ms ease-out, background-color 240ms ease-out;
+  }
+  .prob-label {
+    position: absolute;
+    top: -1px;
+    right: 6px;
+    font-size: 11px;
+    line-height: 16px;
+    color: #e6e6e6;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .winner-banner {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: #1a1d23;
+    border: 1px solid #3a4049;
+    font-size: 14px;
+  }
+  .winner-banner.active { border-color: #f5c542; color: #fff5cf; }
+  .dead { opacity: 0.45; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="board-col">
+    <h1>Greedy (Elo 33.0) vs curriculum_seed0 AlphaZero (Elo 22.0) — 10x10, seed 0</h1>
+    <div class="meta" id="meta"></div>
+    <canvas id="board"></canvas>
+    <div class="controls">
+      <button id="prev" title="Previous frame">&laquo;</button>
+      <button id="play" title="Play/pause">Play</button>
+      <button id="next" title="Next frame">&raquo;</button>
+      <input type="range" id="scrub" min="0" max="0" step="1" value="0" />
+      <span class="turn-readout" id="turn-readout"></span>
+      <label>FPS <select id="fps-select">
+        <option>2</option><option>4</option><option>8</option><option>16</option>
+      </select></label>
+    </div>
+    <div class="winner-banner" id="winner-banner">Game in progress.</div>
+  </div>
+  <div class="side-col" id="side-col"></div>
+</div>
+<script id="tt-data" type="application/json">{"title":"Greedy (Elo 33.0) vs curriculum_seed0 AlphaZero (Elo 22.0) — 10x10, seed 0","board_height":10,"board_width":10,"num_players":2,"fps":4,"tile_colors":["#ffffff","#1f77b4","#d62728","#2ca02c","#9467bd","#aec7e8","#ff9896","#98df8a","#c5b0d5"],"head_edge_colors":["#0a3d66","#7a1516","#1a5e1a","#4a2a6b"],"agents":[{"seat":0,"name":"greedy","strategy":"heuristic-greedy","elo":33.03},{"seat":1,"name":"curriculum_seed0","strategy":"alphazero","elo":22.04}],"frames":[{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[1,1],"alive":[true,true],"heads":[[3,3],[6,6]],"win_probs":[0.49939926762184383,0.5006007323781562],"turn":0,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[2,1],"alive":[true,true],"heads":[[3,4],[6,6]],"win_probs":[0.48824114557986953,0.5117588544201305],"turn":1,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[2,2],"alive":[true,true],"heads":[[3,4],[5,6]],"win_probs":[0.4906719159887264,0.5093280840112736],"turn":2,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[3,2],"alive":[true,true],"heads":[[4,4],[5,6]],"win_probs":[0.48626229022100825,0.5137377097789917],"turn":3,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[3,3],"alive":[true,true],"heads":[[4,4],[4,6]],"win_probs":[0.5047736761716107,0.49522632382838927],"turn":4,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[4,3],"alive":[true,true],"heads":[[4,5],[4,6]],"win_probs":[0.49158353255205106,0.5084164674479489],"turn":5,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[4,4],"alive":[true,true],"heads":[[4,5],[3,6]],"win_probs":[0.489823095762226,0.5101769042377741],"turn":6,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[5,4],"alive":[true,true],"heads":[[5,5],[3,6]],"win_probs":[0.4822593144004839,0.5177406855995161],"turn":7,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[5,5],"alive":[true,true],"heads":[[5,5],[2,6]],"win_probs":[0.48309437794628013,0.5169056220537198],"turn":8,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[6,5],"alive":[true,true],"heads":[[6,5],[2,6]],"win_probs":[0.4807272387880381,0.5192727612119619],"turn":9,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[6,6],"alive":[true,true],"heads":[[6,5],[1,6]],"win_probs":[0.4838990232415244,0.5161009767584757],"turn":10,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[7,6],"alive":[true,true],"heads":[[7,5],[1,6]],"win_probs":[0.48300814675349113,0.5169918532465089],"turn":11,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[7,7],"alive":[true,true],"heads":[[7,5],[0,6]],"win_probs":[0.4870965178983871,0.5129034821016129],"turn":12,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[8,7],"alive":[true,true],"heads":[[7,4],[0,6]],"win_probs":[0.48304958121143465,0.5169504187885654],"turn":13,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[8,8],"alive":[true,true],"heads":[[7,4],[0,5]],"win_probs":[0.4855331726122952,0.5144668273877048],"turn":14,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,0,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[9,8],"alive":[true,true],"heads":[[7,3],[0,5]],"win_probs":[0.4865852426630492,0.5134147573369509],"turn":15,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[9,9],"alive":[true,true],"heads":[[7,3],[0,4]],"win_probs":[0.48781664209709186,0.5121833579029081],"turn":16,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,0,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[10,9],"alive":[true,true],"heads":[[7,2],[0,4]],"win_probs":[0.4865270613767451,0.5134729386232548],"turn":17,"current_player":1,"done":false,"winner":null},{"grid":[0,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[10,10],"alive":[true,true],"heads":[[7,2],[0,3]],"win_probs":[0.4916433833163198,0.5083566166836803],"turn":18,"current_player":0,"done":false,"winner":null},{"grid":[0,0,0,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[11,10],"alive":[true,true],"heads":[[6,2],[0,3]],"win_probs":[0.47999802529053165,0.5200019747094683],"turn":19,"current_player":1,"done":false,"winner":null},{"grid":[0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,0,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[11,11],"alive":[true,true],"heads":[[6,2],[0,2]],"win_probs":[0.4892624117475372,0.5107375882524627],"turn":20,"current_player":0,"done":false,"winner":null},{"grid":[0,0,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[12,11],"alive":[true,true],"heads":[[5,2],[0,2]],"win_probs":[0.4820711667289006,0.5179288332710994],"turn":21,"current_player":1,"done":false,"winner":null},{"grid":[0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,0,0,1,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[12,12],"alive":[true,true],"heads":[[5,2],[0,1]],"win_probs":[0.48125205761872125,0.5187479423812787],"turn":22,"current_player":0,"done":false,"winner":null},{"grid":[0,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,1,0,1,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[13,12],"alive":[true,true],"heads":[[4,2],[0,1]],"win_probs":[0.482484563830222,0.517515436169778],"turn":23,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,1,1,0,2,0,0,0,0,0,1,0,1,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,0,0,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[0,0],"path_len":[13,13],"alive":[true,true],"heads":[[4,2],[0,0]],"win_probs":[0.4841625669158443,0.5158374330841557],"turn":24,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,1,1,1,0,2,0,0,0,0,0,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[5,0],"path_len":[14,13],"alive":[true,true],"heads":[[3,2],[0,0]],"win_probs":[0.5040385370507902,0.4959614629492099],"turn":25,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,1,1,1,0,2,0,0,0,0,0,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[5,0],"path_len":[14,14],"alive":[true,true],"heads":[[3,2],[1,0]],"win_probs":[0.5028502269049218,0.49714977309507824],"turn":26,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,0,0,0,0,0,2,0,0,0,0,0,0,0,0,0,2,0,0,0,0,1,1,1,1,0,2,0,0,0,0,0,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[5,0],"path_len":[15,14],"alive":[true,true],"heads":[[3,1],[1,0]],"win_probs":[0.5042390770148003,0.4957609229851997],"turn":27,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,0,0,0,0,0,2,0,0,0,2,0,0,0,0,0,2,0,0,0,0,1,1,1,1,0,2,0,0,0,0,0,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[5,0],"path_len":[15,15],"alive":[true,true],"heads":[[3,1],[2,0]],"win_probs":[0.49831364229420033,0.5016863577057997],"turn":28,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,0,1,1,1,1,5,2,0,0,0,0,1,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[16,15],"alive":[true,true],"heads":[[4,1],[2,0]],"win_probs":[0.5059457449274047,0.49405425507259526],"turn":29,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,0,1,1,5,1,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[16,16],"alive":[true,true],"heads":[[4,1],[3,0]],"win_probs":[0.498855292166298,0.501144707833702],"turn":30,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,0,1,1,5,1,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[17,16],"alive":[true,true],"heads":[[5,1],[3,0]],"win_probs":[0.5043961541112575,0.49560384588874246],"turn":31,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,0,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[17,17],"alive":[true,true],"heads":[[5,1],[4,0]],"win_probs":[0.503122810762201,0.496877189237799],"turn":32,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[18,17],"alive":[true,true],"heads":[[6,1],[4,0]],"win_probs":[0.5068486836919559,0.49315131630804404],"turn":33,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[18,18],"alive":[true,true],"heads":[[6,1],[5,0]],"win_probs":[0.5062784169795994,0.49372158302040053],"turn":34,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,0,1,1,5,5,1,2,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[19,18],"alive":[true,true],"heads":[[7,1],[5,0]],"win_probs":[0.5113777277815168,0.4886222722184832],"turn":35,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,0,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[19,19],"alive":[true,true],"heads":[[7,1],[6,0]],"win_probs":[0.5095873005882781,0.4904126994117219],"turn":36,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,0,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[20,19],"alive":[true,true],"heads":[[8,1],[6,0]],"win_probs":[0.5203059449189552,0.47969405508104473],"turn":37,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[20,20],"alive":[true,true],"heads":[[8,1],[7,0]],"win_probs":[0.514145207665226,0.48585479233477397],"turn":38,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[21,20],"alive":[true,true],"heads":[[9,1],[7,0]],"win_probs":[0.5225092151992228,0.4774907848007773],"turn":39,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,2,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[21,21],"alive":[true,true],"heads":[[9,1],[8,0]],"win_probs":[0.5229601489323157,0.4770398510676843],"turn":40,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,2,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[22,21],"alive":[true,true],"heads":[[9,2],[8,0]],"win_probs":[0.5258253976813484,0.47417460231865166],"turn":41,"current_player":1,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,2,1,0,0,0,0,0,0,0,0,2,1,1,0,0,0,0,0,0,0],"claimed":[16,0],"path_len":[22,22],"alive":[true,true],"heads":[[9,2],[9,0]],"win_probs":[0.5269866826937628,0.47301331730623725],"turn":42,"current_player":0,"done":false,"winner":null},{"grid":[2,2,2,2,2,2,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,5,5,5,5,5,2,0,0,0,2,1,1,1,1,5,2,0,0,0,2,1,1,5,1,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,5,5,1,2,0,0,0,2,1,1,1,1,1,0,0,0,0,2,1,0,0,0,0,0,0,0,0,2,1,1,1,0,0,0,0,0,0],"claimed":[16,0],"path_len":[23,22],"alive":[true,false],"heads":[[9,3],[9,0]],"win_probs":[1.0,0.0],"turn":43,"current_player":0,"done":true,"winner":0}]}</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("tt-data").textContent);
+  var TILE = DATA.tile_colors;
+  var EDGE = DATA.head_edge_colors;
+  var H = DATA.board_height, W = DATA.board_width;
+  var NUM = DATA.num_players;
+  var FRAMES = DATA.frames;
+  var AGENTS = DATA.agents;
+
+  var canvas = document.getElementById("board");
+  var ctx = canvas.getContext("2d");
+  var CELL = 24;
+  canvas.width = W * CELL;
+  canvas.height = H * CELL;
+
+  function drawFrame(f) {
+    ctx.fillStyle = TILE[0];
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (var r = 0; r < H; r++) {
+      for (var c = 0; c < W; c++) {
+        var v = f.grid[r * W + c];
+        if (v === 0) continue;
+        ctx.fillStyle = TILE[v];
+        ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+      }
+    }
+    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.lineWidth = 1;
+    for (var i = 1; i < W; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * CELL + 0.5, 0);
+      ctx.lineTo(i * CELL + 0.5, canvas.height);
+      ctx.stroke();
+    }
+    for (var j = 1; j < H; j++) {
+      ctx.beginPath();
+      ctx.moveTo(0, j * CELL + 0.5);
+      ctx.lineTo(canvas.width, j * CELL + 0.5);
+      ctx.stroke();
+    }
+    for (var p = 0; p < NUM; p++) {
+      var head = f.heads[p];
+      if (head[0] < 0 || head[1] < 0) continue;
+      if (!f.alive[p]) continue;
+      ctx.strokeStyle = EDGE[p];
+      ctx.lineWidth = 3;
+      ctx.strokeRect(
+        head[1] * CELL + 1.5,
+        head[0] * CELL + 1.5,
+        CELL - 3,
+        CELL - 3
+      );
+    }
+  }
+
+  // Side panel
+  var sideCol = document.getElementById("side-col");
+  var cards = [];
+  for (var s = 0; s < NUM; s++) {
+    var agent = AGENTS[s];
+    var pathColor = TILE[s + 1];
+    var card = document.createElement("div");
+    card.className = "agent-card";
+    card.style.borderLeftColor = pathColor;
+    var elo = agent.elo === null || agent.elo === undefined
+        ? "—"
+        : (agent.elo >= 0 ? "+" : "") + Math.round(agent.elo);
+    card.innerHTML =
+      '<div class="agent-head">' +
+        '<span class="agent-name">' + escapeHtml(agent.name) + '</span>' +
+        '<span class="agent-strategy">' + escapeHtml(agent.strategy) + '</span>' +
+      '</div>' +
+      '<div class="agent-stats">' +
+        '<div><div class="k">Seat</div>' + (s + 1) + '</div>' +
+        '<div><div class="k">Elo</div>' + elo + '</div>' +
+        '<div><div class="k">Status</div><span class="status">alive</span></div>' +
+        '<div><div class="k">Claimed</div><span class="claimed">0</span></div>' +
+        '<div><div class="k">Path</div><span class="path-len">0</span></div>' +
+        '<div><div class="k">Win&nbsp;prob</div><span class="prob-pct">0%</span></div>' +
+      '</div>' +
+      '<div class="prob-bar">' +
+        '<div class="prob-fill" style="background-color:' + pathColor + ';"></div>' +
+      '</div>';
+    sideCol.appendChild(card);
+    cards.push({
+      root: card,
+      status: card.querySelector(".status"),
+      claimed: card.querySelector(".claimed"),
+      pathLen: card.querySelector(".path-len"),
+      pct: card.querySelector(".prob-pct"),
+      fill: card.querySelector(".prob-fill")
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {
+        "&": "&amp;", "<": "&lt;", ">": "&gt;",
+        '"': "&quot;", "'": "&#39;"
+      }[c];
+    });
+  }
+
+  function updateSide(f) {
+    for (var s = 0; s < NUM; s++) {
+      var c = cards[s];
+      c.claimed.textContent = f.claimed[s];
+      c.pathLen.textContent = f.path_len[s];
+      var pct = Math.round(f.win_probs[s] * 100);
+      c.pct.textContent = pct + "%";
+      c.fill.style.width = pct + "%";
+      if (f.alive[s]) {
+        c.status.textContent = "alive";
+        c.root.classList.remove("dead");
+      } else {
+        c.status.textContent = "dead";
+        c.root.classList.add("dead");
+      }
+    }
+  }
+
+  var meta = document.getElementById("meta");
+  meta.textContent = H + "x" + W + " board, " + NUM + " players, "
+      + FRAMES.length + " frames";
+
+  var banner = document.getElementById("winner-banner");
+  var turnReadout = document.getElementById("turn-readout");
+  var scrub = document.getElementById("scrub");
+  scrub.max = String(FRAMES.length - 1);
+
+  var idx = 0;
+  function render() {
+    var f = FRAMES[idx];
+    drawFrame(f);
+    updateSide(f);
+    turnReadout.textContent = "Turn " + f.turn
+        + " · Frame " + (idx + 1) + "/" + FRAMES.length;
+    scrub.value = String(idx);
+    if (f.done) {
+      banner.classList.add("active");
+      if (f.winner === null || f.winner === undefined) {
+        banner.textContent = "Game over — tie.";
+      } else {
+        var w = AGENTS[f.winner];
+        banner.textContent = "Winner: " + w.name + " (seat " + (f.winner + 1) + ")";
+      }
+    } else {
+      banner.classList.remove("active");
+      banner.textContent = "Game in progress.";
+    }
+  }
+
+  var playing = false;
+  var fps = DATA.fps;
+  var timer = null;
+  function stop() {
+    playing = false;
+    document.getElementById("play").textContent = "Play";
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  function start() {
+    if (idx >= FRAMES.length - 1) idx = 0;
+    playing = true;
+    document.getElementById("play").textContent = "Pause";
+    timer = setInterval(function () {
+      if (idx >= FRAMES.length - 1) { stop(); return; }
+      idx += 1;
+      render();
+    }, Math.max(30, Math.round(1000 / fps)));
+  }
+
+  document.getElementById("play").onclick = function () {
+    if (playing) stop(); else start();
+  };
+  document.getElementById("prev").onclick = function () {
+    stop();
+    if (idx > 0) { idx -= 1; render(); }
+  };
+  document.getElementById("next").onclick = function () {
+    stop();
+    if (idx < FRAMES.length - 1) { idx += 1; render(); }
+  };
+  scrub.oninput = function () {
+    stop();
+    idx = parseInt(scrub.value, 10) || 0;
+    render();
+  };
+  var fpsSelect = document.getElementById("fps-select");
+  // Pick the closest preset to the payload's fps.
+  var options = Array.prototype.map.call(fpsSelect.options, function (o) {
+    return parseInt(o.value, 10);
+  });
+  var best = options[0], bestDiff = Math.abs(options[0] - fps);
+  for (var k = 1; k < options.length; k++) {
+    var d = Math.abs(options[k] - fps);
+    if (d < bestDiff) { best = options[k]; bestDiff = d; }
+  }
+  fpsSelect.value = String(best);
+  fps = best;
+  fpsSelect.onchange = function () {
+    fps = parseInt(fpsSelect.value, 10) || 4;
+    if (playing) { stop(); start(); }
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>

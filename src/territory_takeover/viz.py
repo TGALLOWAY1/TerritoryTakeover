@@ -32,6 +32,12 @@ _TILE_COLORS: tuple[str, ...] = (
 )
 _HEAD_EDGE_COLORS: tuple[str, ...] = ("#0a3d66", "#7a1516", "#1a5e1a", "#4a2a6b")
 
+# Public aliases so downstream renderers (e.g. :mod:`territory_takeover.viz_html`)
+# share exactly one palette with the matplotlib/GIF renderer. Keep them in
+# lockstep if the underscore-prefixed tuples are ever tuned.
+TILE_COLORS: tuple[str, ...] = _TILE_COLORS
+HEAD_EDGE_COLORS: tuple[str, ...] = _HEAD_EDGE_COLORS
+
 _EMPTY_HEAD: tuple[int, int] = (-1, -1)
 
 

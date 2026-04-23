@@ -41,6 +41,24 @@ REGISTRY: dict[str, Callable[..., Agent]] = {
 }
 
 
+# Short human-readable strategy label for each agent class. Keyed by
+# ``type(agent).__name__`` so callers can look up a live agent instance without
+# reinstantiating. ``AlphaZeroAgent`` lives in ``rl.alphazero.mcts`` and is
+# listed here even though it isn't in ``REGISTRY`` (which is restricted to
+# tournament-configurable classes) so HTML / dashboard callers can render a
+# consistent label. Unknown class names should fall back to the class name
+# itself at the call site.
+STRATEGY_LABELS: dict[str, str] = {
+    "UniformRandomAgent": "random",
+    "HeuristicGreedyAgent": "heuristic-greedy",
+    "MaxNAgent": "maxn",
+    "ParanoidAgent": "paranoid",
+    "UCTAgent": "uct",
+    "RaveAgent": "rave",
+    "AlphaZeroAgent": "alphazero",
+}
+
+
 def _resolve_evaluator(value: object) -> object:
     """Resolve ``evaluator: "default"`` sentinel to a live ``LinearEvaluator``."""
     if value == "default":
@@ -88,4 +106,4 @@ class AgentSpec:
         return agent
 
 
-__all__ = ["REGISTRY", "AgentSpec"]
+__all__ = ["REGISTRY", "STRATEGY_LABELS", "AgentSpec"]
