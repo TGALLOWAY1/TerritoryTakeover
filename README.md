@@ -61,6 +61,13 @@ incidental — the point is the method.
 and the curriculum AlphaZero reference checkpoint (at 4 PUCT iters).
 Regenerate with `python scripts/record_demo.py --seed 0`.*
 
+To **watch gameplay live in a browser** (no recording, no extra deps),
+run `python scripts/serve_live_demo.py` and open the printed URL. The
+page streams each move as it is played, shows per-seat win-probability
+bars, and exposes a Reset button that starts a fresh game. Pick agents
+with `--seat0`/`--seat1` (`random` / `greedy` / `rave`); see
+`scripts/serve_live_demo.py --help` for all flags.
+
 ![Agent behavior gallery: Random / Greedy / UCT@200 / RAVE@200 self-play at turn 100, 20×20, seed 0](docs/assets/agent_gallery.png)
 
 *Same seed, same starting board, four agents — each playing both seats
