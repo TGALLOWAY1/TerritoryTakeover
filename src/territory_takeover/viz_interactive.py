@@ -1,14 +1,24 @@
-"""Interactive HTTP server for human-vs-agent and spectator play.
+"""Interactive HTTP server for the Territory Takeover *Arena* front end.
 
-Serves a browser UI that lets visitors either watch agents battle each other or
-take control of seat 0 with arrow keys (Tron-style). The server exposes four
-endpoints on top of the :mod:`territory_takeover.viz_live` frame-streaming
-pattern:
+Serves a polished, mobile-first single-page UI (no external assets) that drives
+the real :mod:`territory_takeover.engine` enclosure game. Visitors watch up to
+four agents battle for territory, swap any agent's strategy from a dropdown, and
+drive the simulation with play / pause / step / speed / reset controls. Seat 0
+can optionally be handed to a human (arrow keys / WASD) for Tron-style play.
 
-- ``GET  /``        — setup + game page (single HTML file, no external assets)
-- ``GET  /state``   — incremental frame poll (same shape as viz_live, plus
-                      ``waiting_for_human`` and ``human_seat`` fields)
-- ``POST /start``   — start a new game with a JSON config body
+The territory model is the engine's own: a cell is *owned* by a player the moment
+that player visits it (its path) and stays owned for the rest of the game, plus
+any cells the player encloses. A player's territory is therefore
+``len(path) + claimed_count`` — exactly the engine's scoring.
+
+Endpoints (all served from one process, no build tooling):
+
+- ``GET  /``        — the arena page (single self-contained HTML file)
+- ``GET  /state``   — incremental frame poll (adds ``paused``/``speed`` plus
+                      ``waiting_for_human``/``human_seat`` to the viz_live shape)
+- ``GET  /agents``  — available strategy presets (key/label/description)
+- ``POST /start``   — start a match from a JSON config body
+- ``POST /control`` — ``{"cmd": play|pause|step|reset|speed, "speed"?: float}``
 - ``POST /action``  — submit a human move (``{"action": 0|1|2|3}``)
 
 Typical usage::
@@ -61,26 +71,31 @@ if TYPE_CHECKING:
 AGENT_PRESETS: Final[dict[str, dict[str, object]]] = {
     "random": {
         "label": "Random",
+        "description": "Random walk — picks uniformly among legal moves.",
         "class": "UniformRandomAgent",
         "kwargs": {},
     },
     "greedy": {
         "label": "Greedy",
+        "description": "1-ply heuristic — maximizes board score after the move.",
         "class": "HeuristicGreedyAgent",
         "kwargs": {},
     },
     "mcts-easy": {
-        "label": "MCTS Easy  (~50 sims)",
+        "label": "MCTS Easy",
+        "description": "Monte-Carlo tree search — 50 simulations per move.",
         "class": "UCTAgent",
         "kwargs": {"iterations": 50},
     },
     "mcts-medium": {
-        "label": "MCTS Medium (~200 sims)",
+        "label": "MCTS Medium",
+        "description": "Monte-Carlo tree search — 200 simulations per move.",
         "class": "UCTAgent",
         "kwargs": {"iterations": 200},
     },
     "mcts-hard": {
-        "label": "MCTS Hard  (~800 sims)",
+        "label": "MCTS Hard",
+        "description": "Monte-Carlo tree search — 800 simulations per move.",
         "class": "UCTAgent",
         "kwargs": {"iterations": 800},
     },
@@ -93,15 +108,65 @@ def _build_agent(preset_key: str, seat: int, rng: np.random.Generator) -> Agent:
         preset_key = "greedy"
     preset = AGENT_PRESETS[preset_key]
     cls_name = str(preset["class"])
-    kwargs: dict[str, object] = dict(preset["kwargs"])  # type: ignore[arg-type]
     name = f"p{seat + 1}-{preset_key}"
     if cls_name == "UniformRandomAgent":
-        return UniformRandomAgent(rng=rng, name=name)  # type: ignore[return-value]
+        return UniformRandomAgent(rng=rng, name=name)
     if cls_name == "HeuristicGreedyAgent":
-        return HeuristicGreedyAgent(rng=rng, name=name)  # type: ignore[return-value]
+        return HeuristicGreedyAgent(rng=rng, name=name)
     if cls_name == "UCTAgent":
-        return UCTAgent(rng=rng, name=name, **kwargs)  # type: ignore[return-value]
+        raw_kwargs = preset.get("kwargs", {})
+        raw_iters = raw_kwargs.get("iterations", 200) if isinstance(raw_kwargs, dict) else 200
+        iterations = int(raw_iters) if isinstance(raw_iters, (int, float)) else 200
+        return UCTAgent(rng=rng, name=name, iterations=iterations)
     raise ValueError(f"Unknown agent class {cls_name!r}")
+
+
+def _cfg_int(config: dict[str, object], key: str, default: int) -> int:
+    """Coerce a config value to ``int``, falling back to *default*."""
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _cfg_float(config: dict[str, object], key: str, default: float) -> float:
+    """Coerce a config value to ``float``, falling back to *default*."""
+    value = config.get(key, default)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _cfg_human_seat(config: dict[str, object]) -> int | None:
+    """Read an optional ``human_seat`` index from *config*."""
+    value = config.get("human_seat")
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
+def _cfg_agents(config: dict[str, object]) -> dict[str, str]:
+    """Read the per-seat ``{seat: preset_key}`` mapping from *config*."""
+    raw = config.get("agents")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -109,19 +174,19 @@ def _build_agent(preset_key: str, seat: int, rng: np.random.Generator) -> Agent:
 # ---------------------------------------------------------------------------
 
 class InteractiveServer:
-    """HTTP server that streams live game frames and accepts human arrow-key input.
+    """HTTP server that streams live game frames and accepts control commands.
 
     Call :meth:`start` to launch the background HTTP thread, then POST ``/start``
-    from the browser (or call :meth:`start_game` directly) to begin a game.
-    The server is self-contained: no external assets, no additional threads
-    beyond the HTTP server and the game-loop daemon.
+    from the browser (or call :meth:`start_game` directly) to begin a match.
+    Watch-mode pacing is driven by play / pause / step / speed controls; play
+    mode hands seat 0 to a human whose keypresses set the tempo.
     """
 
     def __init__(
         self,
         host: str = "127.0.0.1",
         port: int = 8000,
-        title: str = "TerritoryTakeover",
+        title: str = "Territory Takeover",
     ) -> None:
         self._host = host
         self._port = port
@@ -133,8 +198,15 @@ class InteractiveServer:
         self._frames: list[dict[str, object]] = []
         self._init: dict[str, object] = {}
 
-        # Signals the game loop to stop (set by /reset or start_game).
+        # Signals the game loop to stop (set by /control reset or start_game).
         self._reset_event = threading.Event()
+
+        # Watch-mode pacing controls (guarded by _ctrl_cond).
+        self._ctrl_cond = threading.Condition()
+        self._paused: bool = False
+        self._speed: float = 1.0
+        self._step_requests: int = 0
+        self._last_config: dict[str, object] | None = None
 
         # Human-turn synchronisation.
         # maxsize=1 so stale inputs cannot accumulate; the latest keypress wins.
@@ -187,6 +259,56 @@ class InteractiveServer:
             self._frames.append(frame)
 
     # ------------------------------------------------------------------
+    # Watch-mode controls (called from the HTTP handler thread)
+    # ------------------------------------------------------------------
+
+    def set_paused(self, paused: bool) -> None:
+        """Pause or resume automatic stepping in watch mode."""
+        with self._ctrl_cond:
+            self._paused = paused
+            self._ctrl_cond.notify_all()
+
+    def set_speed(self, speed: float) -> None:
+        """Set the watch-mode speed multiplier (clamped to a sane range)."""
+        with self._ctrl_cond:
+            self._speed = max(0.1, min(50.0, speed))
+            self._ctrl_cond.notify_all()
+
+    def request_step(self) -> None:
+        """Advance exactly one move, then remain paused."""
+        with self._ctrl_cond:
+            self._paused = True
+            self._step_requests += 1
+            self._ctrl_cond.notify_all()
+
+    def _wait_to_step(self) -> tuple[bool, bool, float]:
+        """Block until a watch-mode move may run.
+
+        Returns ``(proceed, manual, speed)``. ``proceed`` is ``False`` only when
+        a reset was requested; ``manual`` is ``True`` for a single-step request
+        (no pacing sleep should follow).
+        """
+        with self._ctrl_cond:
+            while True:
+                if self._reset_event.is_set():
+                    return (False, False, 1.0)
+                if self._step_requests > 0:
+                    self._step_requests -= 1
+                    return (True, True, self._speed)
+                if not self._paused:
+                    return (True, False, self._speed)
+                self._ctrl_cond.wait(timeout=0.1)
+
+    def _paced_sleep(self, seconds: float) -> None:
+        """Sleep up to *seconds*, waking early if a reset is requested."""
+        deadline = time.monotonic() + seconds
+        while not self._reset_event.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 0.05))
+
+    # ------------------------------------------------------------------
     # Human action API (called from the HTTP handler thread)
     # ------------------------------------------------------------------
 
@@ -214,6 +336,8 @@ class InteractiveServer:
                     "init": dict(self._init),
                     "frames": list(self._frames),
                     "from_frame": 0,
+                    "paused": self._paused,
+                    "speed": self._speed,
                     "waiting_for_human": self._waiting_for_human,
                     "human_seat": self._human_seat,
                 }
@@ -227,6 +351,8 @@ class InteractiveServer:
                 "init": None,
                 "frames": list(tail),
                 "from_frame": max(0, client_frame),
+                "paused": self._paused,
+                "speed": self._speed,
                 "waiting_for_human": self._waiting_for_human,
                 "human_seat": self._human_seat,
             }
@@ -238,6 +364,8 @@ class InteractiveServer:
     def start_game(self, config: dict[str, object]) -> None:
         """Stop any running game and launch a new one from *config*."""
         self._reset_event.set()
+        with self._ctrl_cond:
+            self._ctrl_cond.notify_all()
         if self._game_thread is not None and self._game_thread.is_alive():
             self._game_thread.join(timeout=3.0)
         self._reset_event.clear()
@@ -249,9 +377,15 @@ class InteractiveServer:
             except queue.Empty:
                 break
 
+        # Reset watch-mode controls for the new match.
+        with self._ctrl_cond:
+            self._paused = not bool(config.get("autoplay", True))
+            self._speed = _cfg_float(config, "speed", 1.0)
+            self._step_requests = 0
+        self._last_config = dict(config)
+
         self._waiting_for_human = False
-        raw_hs = config.get("human_seat")
-        self._human_seat = None if raw_hs is None else int(raw_hs)  # type: ignore[arg-type]
+        self._human_seat = _cfg_human_seat(config)
 
         self._game_thread = threading.Thread(
             target=self._run_game,
@@ -262,15 +396,11 @@ class InteractiveServer:
         self._game_thread.start()
 
     def _run_game(self, config: dict[str, object]) -> None:
-        board_size = int(config.get("board_size", 15))  # type: ignore[arg-type]
-        num_players = int(config.get("num_players", 2))  # type: ignore[arg-type]
-        fps = int(config.get("fps", 4))  # type: ignore[arg-type]
-        raw_hs = config.get("human_seat")
-        human_seat: int | None = None if raw_hs is None else int(raw_hs)  # type: ignore[arg-type]
-        agents_cfg: dict[str, str] = {
-            str(k): str(v)
-            for k, v in (config.get("agents") or {}).items()  # type: ignore[union-attr]
-        }
+        board_size = _cfg_int(config, "board_size", 32)
+        num_players = _cfg_int(config, "num_players", 4)
+        base_fps = max(1, _cfg_int(config, "fps", 6))
+        human_seat = _cfg_human_seat(config)
+        agents_cfg = _cfg_agents(config)
 
         evaluator = default_evaluator()
 
@@ -299,8 +429,8 @@ class InteractiveServer:
                 agent_cards.append(
                     AgentCard(
                         seat=seat,
-                        name=getattr(agent, "name", f"p{seat + 1}"),
-                        strategy=str(preset["label"]),
+                        name=str(preset["label"]),
+                        strategy=preset_key,
                         elo=None,
                     )
                 )
@@ -311,7 +441,7 @@ class InteractiveServer:
             board_height=int(state.grid.shape[0]),
             board_width=int(state.grid.shape[1]),
             num_players=num_players,
-            fps=fps,
+            fps=base_fps,
         )
         self._push_frame(state, win_probs(state))
 
@@ -319,38 +449,46 @@ class InteractiveServer:
             if a is not None:
                 a.reset()
 
-        # In watch mode delay frames so the browser can keep up.
-        # In play mode the human's pace drives the tempo; AI responds immediately.
-        ai_delay = 0.0 if human_seat is not None else 1.0 / max(1, fps)
-
         while not state.done:
             if self._reset_event.is_set():
                 return
 
             seat = state.current_player
 
+            if human_seat is None:
+                # Watch mode: pacing is driven by the play/pause/step controls.
+                proceed, manual, speed = self._wait_to_step()
+                if not proceed:
+                    return
+                ai = agents[seat]
+                assert ai is not None
+                action = ai.select_action(state, seat)
+                step(state, action, strict=False)
+                self._push_frame(state, win_probs(state))
+                if not manual and not self._paused:
+                    self._paced_sleep(1.0 / (base_fps * max(0.1, speed)))
+                continue
+
+            # Play mode: the human drives tempo; AI opponents respond at once.
             if seat == human_seat:
                 self._waiting_for_human = True
-                action: int | None = None
-                while action is None:
+                action_h: int | None = None
+                while action_h is None:
                     if self._reset_event.is_set():
                         self._waiting_for_human = False
                         return
                     with contextlib.suppress(queue.Empty):
-                        action = self._action_queue.get(timeout=0.05)
+                        action_h = self._action_queue.get(timeout=0.05)
                 self._waiting_for_human = False
+                step(state, action_h, strict=False)
             else:
                 ai = agents[seat]
                 assert ai is not None
-                action = ai.select_action(state, seat)
-                if ai_delay > 0.0:
-                    time.sleep(ai_delay)
-
-            step(state, action, strict=False)
+                step(state, ai.select_action(state, seat), strict=False)
             self._push_frame(state, win_probs(state))
 
         # Brief pause on the final frame so the winner banner is visible.
-        for _ in range(max(1, fps) * 2):
+        for _ in range(base_fps * 2):
             if self._reset_event.is_set():
                 return
             time.sleep(0.5)
@@ -374,6 +512,8 @@ class InteractiveServer:
     def stop(self) -> None:
         """Signal the game loop to exit and shut down the HTTP server."""
         self._reset_event.set()
+        with self._ctrl_cond:
+            self._ctrl_cond.notify_all()
         if self._httpd is not None:
             self._httpd.shutdown()
             self._httpd.server_close()
@@ -400,7 +540,11 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
                 self._serve_state()
             elif path == "/agents":
                 presets = [
-                    {"key": k, "label": v["label"]}
+                    {
+                        "key": k,
+                        "label": v["label"],
+                        "description": v.get("description", ""),
+                    }
                     for k, v in AGENT_PRESETS.items()
                 ]
                 self._send_json(HTTPStatus.OK, {"presets": presets})
@@ -416,6 +560,8 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
                     return
                 server.start_game(body)
                 self._send_json(HTTPStatus.OK, {"ok": True})
+            elif path == "/control":
+                self._handle_control()
             elif path == "/action":
                 body = self._read_json_body()
                 if body is None:
@@ -430,10 +576,37 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
                 queued = server.queue_action(raw)
                 self._send_json(HTTPStatus.OK, {"ok": True, "queued": queued})
             elif path == "/reset":
-                server._reset_event.set()
+                if server._last_config is not None:
+                    server.start_game(server._last_config)
                 self._send_json(HTTPStatus.OK, {"ok": True})
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+
+        def _handle_control(self) -> None:
+            body = self._read_json_body()
+            if body is None:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
+                return
+            cmd = body.get("cmd")
+            if cmd == "play":
+                server.set_paused(False)
+            elif cmd == "pause":
+                server.set_paused(True)
+            elif cmd == "step":
+                server.request_step()
+            elif cmd == "speed":
+                sp = body.get("speed")
+                if not isinstance(sp, (int, float)):
+                    self._send_json(HTTPStatus.BAD_REQUEST, {"error": "bad speed"})
+                    return
+                server.set_speed(float(sp))
+            elif cmd == "reset":
+                if server._last_config is not None:
+                    server.start_game(server._last_config)
+            else:
+                self._send_json(HTTPStatus.BAD_REQUEST, {"error": "unknown cmd"})
+                return
+            self._send_json(HTTPStatus.OK, {"ok": True})
 
         def _read_json_body(self) -> dict[str, object] | None:
             try:
@@ -449,7 +622,7 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
                 return None
             if not isinstance(data, dict):
                 return None
-            return data  # type: ignore[return-value]
+            return {str(k): v for k, v in data.items()}
 
         def _serve_index(self) -> None:
             body = render_interactive_html(server._title).encode("utf-8")
@@ -490,7 +663,7 @@ _TITLE_MARKER: Final[str] = "__TT_ITITLE__"
 
 
 def render_interactive_html(title: str) -> str:
-    """Render the interactive page with *title* injected."""
+    """Render the arena page with *title* injected."""
     return _TEMPLATE.replace(_TITLE_MARKER, _html.escape(title))
 
 
@@ -498,569 +671,730 @@ _TEMPLATE: Final[str] = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
 <title>__TT_ITITLE__</title>
 <style>
-:root{color-scheme:light dark}
+:root{
+  --bg:#070a12; --panel:#0f1626; --panel2:#131c30; --line:#1d2944;
+  --ink:#e8edf7; --mut:#8a96b0; --mut2:#5d6886; --accent:#3b82f6;
+  --s0:#ff6a3d; --s1:#a855f7; --s2:#22c55e; --s3:#3b82f6;
+}
 *{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{
-  margin:0;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  background:#0f1115;color:#e6e6e6;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.app{max-width:480px;margin:0 auto;padding:14px 14px 84px;position:relative}
+.glass{
+  background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
+  border:1px solid var(--line);border-radius:16px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35);
 }
 
-/* ── setup overlay ─────────────────────────────────────────────────────── */
-#setup-overlay{
-  position:fixed;inset:0;
-  background:rgba(10,11,15,0.95);
+/* header */
+.hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.icon-btn{
+  width:42px;height:42px;border-radius:12px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);color:var(--ink);
   display:flex;align-items:center;justify-content:center;
-  z-index:100;
-  transition:opacity .18s;
+  transition:background .15s,border-color .15s;
 }
-#setup-overlay.hidden{opacity:0;pointer-events:none}
-.setup-box{
-  background:#1a1d23;
-  border:1px solid #2a2f38;border-radius:8px;
-  padding:28px 32px;width:380px;max-width:96vw;
+.icon-btn:hover{background:var(--panel2);border-color:#2a3a5e}
+.title-wrap{text-align:center;flex:1;padding:0 8px}
+.title{
+  font-size:21px;font-weight:800;letter-spacing:3px;margin:0;
+  background:linear-gradient(90deg,#fff,#9fc2ff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
 }
-.setup-box h2{font-size:18px;margin:0 0 20px;letter-spacing:.3px}
-.sf{margin-bottom:16px}
-.sf-label{
-  font-size:11px;color:#9aa0a6;
-  text-transform:uppercase;letter-spacing:.7px;
-  margin-bottom:6px;
-}
-.seg-row{display:flex}
-.seg{
-  flex:1;background:#22252c;color:#9aa0a6;
-  border:1px solid #3a4049;
-  padding:6px 0;font-size:13px;cursor:pointer;
-  transition:background .12s,color .12s;
-}
-.seg:first-child{border-radius:4px 0 0 4px}
-.seg:last-child{border-radius:0 4px 4px 0}
-.seg:not(:first-child){border-left-width:0}
-.seg.on{background:#2e3340;color:#e6e6e6;border-color:#5a6275}
-.seat-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.seat-label{font-size:12px;color:#9aa0a6;width:110px;flex-shrink:0}
-.seat-val{font-size:13px;color:#c4c7cc}
-select.agent-sel{
-  flex:1;background:#22252c;color:#e6e6e6;
-  border:1px solid #3a4049;border-radius:4px;
-  padding:5px 8px;font-size:13px;cursor:pointer;
-}
-#start-btn{
-  width:100%;padding:10px;font-size:14px;
-  background:#2563eb;border:1px solid #1d4ed8;color:#fff;
-  border-radius:4px;cursor:pointer;margin-top:8px;
-  transition:background .12s;
-}
-#start-btn:hover{background:#1d4ed8}
+.subtitle{font-size:11px;color:var(--mut);margin-top:3px;letter-spacing:.4px}
 
-/* ── game area ──────────────────────────────────────────────────────────── */
-.wrap{display:flex;flex-wrap:wrap;gap:24px;padding:24px}
-.board-col{flex:1 1 420px;min-width:320px}
-.side-col{flex:1 1 300px;min-width:280px;max-width:460px}
-h1{font-size:20px;margin:0 0 10px;letter-spacing:.3px}
-.meta{font-size:12px;color:#9aa0a6;margin-bottom:10px}
-canvas{
-  width:100%;height:auto;
-  background:#1a1d23;border:1px solid #2a2f38;
-  border-radius:6px;image-rendering:pixelated;display:block;
-}
-.controls{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
-button{
-  background:#2a2f38;color:#e6e6e6;
-  border:1px solid #3a4049;border-radius:4px;
-  padding:6px 12px;cursor:pointer;font-size:13px;
-  transition:background .12s;
-}
-button:hover{background:#353b45}
-.turn-ro{font-size:12px;color:#c4c7cc;min-width:100px}
-.live-pill{
-  font-size:11px;padding:2px 8px;border-radius:999px;
-  background:#2a2f38;color:#9aa0a6;
-  text-transform:uppercase;letter-spacing:.6px;
-}
-.live-pill.on{background:#1f3a1f;color:#b8e6b8}
-.live-pill.off{background:#3a1f1f;color:#e6b8b8}
-
-/* ── your-turn banner ───────────────────────────────────────────────────── */
-#your-turn{
-  display:none;margin-top:10px;
-  padding:9px 14px;border-radius:6px;
-  background:#0e2419;border:1px solid #2d6a42;color:#a8e6be;
-  font-size:13px;
-  animation:pulse-border 1.1s ease-in-out infinite;
-}
-#your-turn.show{display:block}
-@keyframes pulse-border{
-  0%,100%{border-color:#2d6a42}
-  50%{border-color:#5aad7a;box-shadow:0 0 8px rgba(90,173,122,.25)}
+/* section label */
+.sec-label{
+  font-size:11px;color:var(--mut2);letter-spacing:1.4px;
+  text-transform:uppercase;margin:0 4px 8px;
 }
 
-/* ── key hint strip ─────────────────────────────────────────────────────── */
-#key-hint{
-  display:none;margin-top:6px;
-  font-size:11px;color:#6a7280;letter-spacing:.3px;
+/* agent selector bar */
+.selbar{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px}
+.chip{
+  position:relative;display:flex;align-items:center;gap:8px;
+  padding:9px 10px;border-radius:12px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);
+  border-left:3px solid var(--c);
+  transition:border-color .15s,background .15s;
 }
-#key-hint.show{display:block}
+.chip:hover{background:var(--panel2);border-color:#2a3a5e;border-left-color:var(--c)}
+.chip.open{border-color:var(--c);box-shadow:0 0 0 1px var(--c) inset}
+.chip-ic{color:var(--c);display:flex;flex-shrink:0;filter:drop-shadow(0 0 4px var(--c))}
+.chip-name{font-size:13px;font-weight:600;flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.chev{color:var(--mut);font-size:11px;flex-shrink:0;transition:transform .15s}
+.chip.open .chev{transform:rotate(180deg)}
+.chip-menu{
+  display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:40;
+  background:var(--panel2);border:1px solid var(--line);border-radius:12px;
+  padding:5px;box-shadow:0 16px 40px rgba(0,0,0,.5);
+}
+.chip.open .chip-menu{display:block}
+.mi{padding:8px 9px;border-radius:8px;cursor:pointer}
+.mi:hover{background:var(--panel)}
+.mi.on{background:rgba(59,130,246,.16)}
+.mi-name{font-size:13px;font-weight:600}
+.mi-desc{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.3}
 
-/* ── winner banner ──────────────────────────────────────────────────────── */
-.w-banner{
-  margin-top:12px;padding:10px 12px;
-  border-radius:6px;background:#1a1d23;
-  border:1px solid #3a4049;font-size:14px;
+/* board */
+.board-wrap{padding:10px;margin-bottom:14px;position:relative}
+canvas{width:100%;height:auto;display:block;border-radius:10px;background:#05080f}
+.board-glow{position:absolute;inset:0;border-radius:16px;pointer-events:none;
+  box-shadow:0 0 60px rgba(59,130,246,.06) inset}
+.winner{
+  position:absolute;inset:10px;border-radius:10px;display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:6px;
+  background:rgba(5,8,15,.78);backdrop-filter:blur(2px);z-index:20;text-align:center;
 }
-.w-banner.active{border-color:#f5c542;color:#fff5cf}
+.winner.show{display:flex}
+.winner .wt{font-size:12px;color:var(--mut);letter-spacing:2px;text-transform:uppercase}
+.winner .wn{font-size:24px;font-weight:800}
+.winner .wh{font-size:12px;color:var(--mut)}
 
-/* ── agent cards ─────────────────────────────────────────────────────────── */
-.agent-card{
-  background:#1a1d23;border:1px solid #2a2f38;
-  border-left-width:6px;border-radius:6px;
-  padding:10px 12px;margin-bottom:10px;
+/* controls */
+.controls{display:flex;align-items:center;gap:8px;padding:10px;margin-bottom:16px}
+.ctl{
+  width:44px;height:44px;border-radius:12px;cursor:pointer;flex-shrink:0;
+  background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;font-size:15px;
+  transition:background .15s,border-color .15s;
 }
-.agent-card.current{box-shadow:0 0 0 1px #f5c542 inset}
-.agent-card.human-card{box-shadow:0 0 0 1px #5aad7a inset}
-.a-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.a-name{font-weight:600;font-size:14px}
-.a-strat{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#9aa0a6}
-.a-stats{
-  display:grid;grid-template-columns:repeat(3,1fr);
-  gap:4px 8px;font-size:12px;margin-top:6px;color:#c4c7cc;
+.ctl:hover{background:var(--panel2);border-color:#2a3a5e}
+.ctl.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.ctl.primary:hover{background:#2f6fe0}
+.ctl-spacer{flex:1}
+.readout{text-align:center;line-height:1.1}
+.readout .turn{font-size:15px;font-weight:700}
+.readout .time{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+.speed-sel{
+  background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  border-radius:10px;padding:0 8px;height:40px;font-size:13px;cursor:pointer;
 }
-.a-stats .k{color:#9aa0a6;font-size:11px}
-.prob-bar{
-  margin-top:8px;height:14px;background:#2a2f38;
-  border-radius:3px;overflow:hidden;position:relative;
-}
-.prob-fill{height:100%;width:0%;transition:width 220ms ease-out}
-.prob-label{
-  position:absolute;top:-1px;right:6px;
-  font-size:11px;line-height:16px;color:#e6e6e6;
-  text-shadow:0 1px 2px rgba(0,0,0,.4);
-}
-.dead{opacity:.42}
+
+/* stats */
+.stats{padding:6px;margin-bottom:14px}
+.stat-row{display:flex;align-items:center;gap:11px;padding:11px 8px;
+  border-bottom:1px solid var(--line)}
+.stat-row:last-child{border-bottom:none}
+.stat-ic{width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;color:var(--c);
+  background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.stat-main{flex:1;min-width:0}
+.stat-name{font-size:14px;font-weight:700}
+.stat-desc{font-size:11px;color:var(--mut);margin:1px 0 5px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.terr{display:flex;align-items:center;gap:8px}
+.terr-pct{font-size:13px;font-weight:700;min-width:50px;font-variant-numeric:tabular-nums}
+.terr-bar{flex:1;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.terr-fill{height:100%;width:0%;border-radius:4px;background:var(--c);
+  transition:width .25s ease-out}
+.stat-right{text-align:right;flex-shrink:0}
+.status{font-size:12px;font-weight:600;display:flex;align-items:center;
+  gap:5px;justify-content:flex-end}
+.dot{width:7px;height:7px;border-radius:50%;background:#22c55e;
+  box-shadow:0 0 6px #22c55e}
+.status.dead{color:var(--mut2)}
+.status.dead .dot{background:#64748b;box-shadow:none}
+.mini{font-size:10px;color:var(--mut2);margin-top:4px;font-variant-numeric:tabular-nums}
+.stat-row.dead-row{opacity:.5}
+
+/* placeholder views */
+.ph{padding:40px 20px;text-align:center;margin-bottom:14px;display:none}
+.ph.show{display:block}
+.ph h3{margin:0 0 6px;font-size:16px}
+.ph p{margin:0;color:var(--mut);font-size:13px}
+
+/* drawers (debug + settings) */
+.drawer{display:none;padding:14px;margin-bottom:14px}
+.drawer.show{display:block}
+.drawer h3{margin:0 0 10px;font-size:13px;letter-spacing:1px;
+  text-transform:uppercase;color:var(--mut)}
+.dbg-grid{font-size:12px;font-variant-numeric:tabular-nums}
+.dbg-line{display:flex;justify-content:space-between;padding:4px 0;
+  border-bottom:1px solid var(--line)}
+.dbg-line:last-child{border-bottom:none}
+.dbg-k{color:var(--mut)}
+.seg-row{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px}
+.seg{flex:1;min-width:56px;background:var(--panel);color:var(--mut);
+  border:1px solid var(--line);border-radius:9px;padding:8px 0;font-size:13px;
+  cursor:pointer;transition:background .12s,color .12s}
+.seg.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--mut);
+  margin-bottom:12px;cursor:pointer}
+.apply{width:100%;padding:11px;border-radius:10px;cursor:pointer;
+  background:var(--accent);border:1px solid var(--accent);color:#fff;
+  font-size:14px;font-weight:600}
+
+/* bottom nav */
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:50;
+  background:rgba(8,11,18,.92);backdrop-filter:blur(10px);
+  border-top:1px solid var(--line);display:flex}
+.nav-inner{max-width:480px;margin:0 auto;width:100%;display:flex}
+.nav-item{flex:1;padding:11px 0 13px;text-align:center;cursor:pointer;
+  color:var(--mut2);font-size:11px;letter-spacing:.4px}
+.nav-item.on{color:var(--accent)}
+.nav-item .ni{display:block;margin:0 auto 3px;width:22px;height:22px}
+.kbd-hint{display:none;text-align:center;font-size:11px;color:var(--mut2);
+  margin-bottom:12px}
+.kbd-hint.show{display:block}
 </style>
 </head>
 <body>
+<div class="app">
 
-<!-- ═══════════ SETUP OVERLAY ═══════════ -->
-<div id="setup-overlay">
-  <div class="setup-box">
-    <h2>__TT_ITITLE__</h2>
+  <!-- header -->
+  <div class="hdr">
+    <div class="icon-btn" id="menu-btn" title="Debug panel">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </div>
+    <div class="title-wrap">
+      <h1 class="title">__TT_ITITLE__</h1>
+      <div class="subtitle">Claim territory. Cut off opponents. Win.</div>
+    </div>
+    <div class="icon-btn" id="settings-btn" title="Settings">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65
+          1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51
+          1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82
+          1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82
+          l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2
+          2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83
+          2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65
+          1.65 0 0 0-1.51 1z"/></svg>
+    </div>
+  </div>
 
-    <div class="sf">
-      <div class="sf-label">Mode</div>
-      <div class="seg-row" id="mode-row">
-        <button class="seg on" data-val="play">Play (arrow keys)</button>
-        <button class="seg" data-val="watch">Watch agents</button>
+  <!-- settings drawer -->
+  <div class="glass drawer" id="settings-drawer">
+    <h3>Settings</h3>
+    <div class="sec-label" style="margin-left:0">Board size</div>
+    <div class="seg-row" id="size-row">
+      <button class="seg" data-val="16">16</button>
+      <button class="seg" data-val="24">24</button>
+      <button class="seg on" data-val="32">32</button>
+      <button class="seg" data-val="40">40</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="human-chk"/>
+      Play seat 1 myself (arrow keys / WASD)</label>
+    <button class="apply" id="apply-settings">Apply &amp; new match</button>
+  </div>
+
+  <!-- debug drawer -->
+  <div class="glass drawer" id="debug-drawer">
+    <h3>Debug panel</h3>
+    <div class="dbg-grid" id="dbg-grid"></div>
+  </div>
+
+  <!-- ARENA view -->
+  <div id="arena-view">
+    <div class="sec-label">Select agents &mdash; tap to swap strategy</div>
+    <div class="selbar" id="selbar"></div>
+
+    <div class="glass board-wrap">
+      <div class="board-glow"></div>
+      <canvas id="board" width="640" height="640"></canvas>
+      <div class="winner" id="winner">
+        <div class="wt">Game over</div>
+        <div class="wn" id="winner-name">&mdash;</div>
+        <div class="wh">Tap reset for a new match</div>
       </div>
     </div>
 
-    <div class="sf">
-      <div class="sf-label">Board size</div>
-      <div class="seg-row" id="board-row">
-        <button class="seg" data-val="10">10</button>
-        <button class="seg on" data-val="15">15</button>
-        <button class="seg" data-val="20">20</button>
-        <button class="seg" data-val="30">30</button>
+    <div class="glass controls">
+      <div class="ctl primary" id="play-btn" title="Play / pause"></div>
+      <div class="ctl" id="step-btn" title="Step one move">&#x21E5;</div>
+      <div class="ctl" id="reset-btn" title="Reset match">&#x21BB;</div>
+      <div class="ctl-spacer"></div>
+      <div class="readout">
+        <div class="turn" id="turn-ro">Turn 0</div>
+        <div class="time" id="time-ro">00:00</div>
       </div>
+      <select class="speed-sel" id="speed-sel">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1.0x</option>
+        <option value="2">2.0x</option>
+        <option value="5">5.0x</option>
+        <option value="20">20x</option>
+      </select>
     </div>
 
-    <div class="sf">
-      <div class="sf-label">Players</div>
-      <div class="seg-row" id="players-row">
-        <button class="seg on" data-val="2">2</button>
-        <button class="seg" data-val="3">3</button>
-        <button class="seg" data-val="4">4</button>
-      </div>
-    </div>
+    <div class="kbd-hint" id="kbd-hint">Your turn &mdash; &#x2190;&#x2191;&#x2192;&#x2193;
+      or WASD</div>
 
-    <div class="sf" id="seat-box"></div>
+    <div class="sec-label">Agents</div>
+    <div class="glass stats" id="stats"></div>
+  </div>
 
-    <button id="start-btn">Start Game</button>
+  <!-- placeholder views -->
+  <div class="glass ph" id="agents-view">
+    <h3>Agents</h3>
+    <p>Strategy library &amp; tuning coming soon. Swap agents from the Arena for now.</p>
+  </div>
+  <div class="glass ph" id="history-view">
+    <h3>History</h3>
+    <p>Match history &amp; replays coming soon.</p>
   </div>
 </div>
 
-<!-- ═══════════ GAME AREA ═══════════ -->
-<div class="wrap">
-  <div class="board-col">
-    <h1>__TT_ITITLE__</h1>
-    <div class="meta" id="meta">Configure a game above to begin.</div>
-    <canvas id="board" width="360" height="360"></canvas>
-    <div class="controls">
-      <button id="new-game-btn">New Game</button>
-      <button id="restart-btn" disabled>Restart</button>
-      <span class="turn-ro" id="turn-ro"></span>
-      <span class="live-pill off" id="pill">offline</span>
-    </div>
-    <div id="your-turn">&#x2190;&#x2191;&#x2192;&#x2193; Your turn &mdash; press an arrow key!</div>
-    <div id="key-hint">&#x2191; N &nbsp;&#x2193; S &nbsp;&#x2190; W &nbsp;&#x2192; E</div>
-    <div class="w-banner" id="w-banner">Waiting for game&hellip;</div>
-  </div>
-  <div class="side-col" id="side-col"></div>
-</div>
+<!-- bottom nav -->
+<div class="nav"><div class="nav-inner">
+  <div class="nav-item on" data-view="arena">
+    <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <rect x="3" y="3" width="7" height="7" rx="1"/>
+      <rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/>
+      <rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>Arena</div>
+  <div class="nav-item" data-view="agents">
+    <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round"><rect x="5" y="8" width="14" height="11" rx="3"/>
+      <path d="M12 4v4"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/>
+    </svg>Agents</div>
+  <div class="nav-item" data-view="history">
+    <svg class="ni" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round"><path d="M4 19V5M10 19v-8M16 19v-5M20 19V9"/></svg>History</div>
+</div></div>
 
 <script>
 (function () {
 "use strict";
 
-/* ══════════════════════════════════════════════════════════════════
-   SETUP FORM
-   ══════════════════════════════════════════════════════════════════ */
+/* ── config / state ───────────────────────────────────────────────── */
+var DEFAULT_LINEUP = ["greedy", "mcts-easy", "mcts-medium", "random"];
+var LINEUP   = DEFAULT_LINEUP.slice();
+var PRESETS  = [];
+var PRESET_MAP = {};
+var BOARD_SIZE = 32, NUM_PLAYERS = 4, BASE_FPS = 6, SPEED = 1, HUMAN = false;
+var SEAT = [
+  {base:"#ff6a3d"}, {base:"#a855f7"}, {base:"#22c55e"}, {base:"#3b82f6"}
+];
 
-var F = { mode: "play", boardSize: 15, numPlayers: 2 };
-var currentConfig = null;  // last successfully started config
+var EPISODE = -1, FRAMES = [], INIT = null, CELL = 20;
+var PREV_HEADS = [], LAST_MOVE = ["-","-","-","-"];
+var matchStart = 0, doneAt = 0, gameDone = false;
+var serverPaused = false, waitingForHuman = false, actionSubmitted = false;
+var STAT_ROWS = [];
 
-var PRESET_KEYS  = ["random","greedy","mcts-easy","mcts-medium","mcts-hard"];
-var PRESET_LABELS= ["Random","Greedy",
-  "MCTS Easy (~50 sims)","MCTS Medium (~200 sims)","MCTS Hard (~800 sims)"];
+var canvas = document.getElementById("board");
+var ctx = canvas.getContext("2d");
 
-function makeSeg(rowId, onChange) {
-  var row = document.getElementById(rowId);
-  var btns = row ? Array.prototype.slice.call(row.querySelectorAll(".seg")) : [];
-  btns.forEach(function (b) {
-    b.addEventListener("click", function () {
-      btns.forEach(function (x) { x.classList.remove("on"); });
-      b.classList.add("on");
-      if (onChange) onChange(b.dataset.val);
-    });
-  });
-}
-
-function renderSeatBox() {
-  var box = document.getElementById("seat-box");
-  box.innerHTML = "";
-  var start = F.mode === "play" ? 1 : 0;
-  if (F.mode === "play") {
-    var youRow = document.createElement("div");
-    youRow.className = "seat-row";
-    youRow.innerHTML = '<span class="seat-label">Seat 1 — You</span>'
-      + '<span class="seat-val" style="color:#5aad7a">Human · arrow keys</span>';
-    box.appendChild(youRow);
-  }
-  for (var s = start; s < F.numPlayers; s++) {
-    var row = document.createElement("div");
-    row.className = "seat-row";
-    var label = F.mode === "play"
-      ? "Seat " + (s + 1) + " — Opp"
-      : "Seat " + (s + 1);
-    var sel = document.createElement("select");
-    sel.className = "agent-sel";
-    sel.dataset.seat = String(s);
-    for (var i = 0; i < PRESET_KEYS.length; i++) {
-      var opt = document.createElement("option");
-      opt.value = PRESET_KEYS[i];
-      opt.textContent = PRESET_LABELS[i];
-      if (PRESET_KEYS[i] === "greedy") opt.selected = true;
-      sel.appendChild(opt);
-    }
-    row.innerHTML = '<span class="seat-label">' + esc(label) + '</span>';
-    row.appendChild(sel);
-    box.appendChild(row);
-  }
-}
-
-function buildConfig() {
-  var agents = {};
-  var start = F.mode === "play" ? 1 : 0;
-  for (var s = start; s < F.numPlayers; s++) {
-    var sel = document.querySelector('.agent-sel[data-seat="' + s + '"]');
-    agents[String(s)] = sel ? sel.value : "greedy";
-  }
-  return {
-    mode: F.mode,
-    board_size: F.boardSize,
-    num_players: F.numPlayers,
-    fps: F.mode === "play" ? 8 : 4,
-    human_seat: F.mode === "play" ? 0 : null,
-    agents: agents
-  };
-}
-
-makeSeg("mode-row", function (v) {
-  F.mode = v;
-  renderSeatBox();
-  updateKeyHint();
-});
-makeSeg("board-row", function (v) { F.boardSize = parseInt(v, 10); });
-makeSeg("players-row", function (v) {
-  F.numPlayers = parseInt(v, 10);
-  renderSeatBox();
-});
-renderSeatBox();
-
-document.getElementById("start-btn").addEventListener("click", function () {
-  var cfg = buildConfig();
-  fetch("/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(cfg),
-    cache: "no-store"
-  })
-  .then(function (r) { return r.json(); })
-  .then(function (j) {
-    if (j.ok) {
-      currentConfig = cfg;
-      document.getElementById("setup-overlay").classList.add("hidden");
-      document.getElementById("restart-btn").disabled = false;
-      updateKeyHint();
-    }
-  })
-  .catch(function (e) { console.error("start failed", e); });
-});
-
-document.getElementById("new-game-btn").addEventListener("click", function () {
-  document.getElementById("setup-overlay").classList.remove("hidden");
-});
-
-document.getElementById("restart-btn").addEventListener("click", function () {
-  if (!currentConfig) return;
-  fetch("/start", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(currentConfig),
-    cache: "no-store"
-  }).catch(function (e) { console.error("restart failed", e); });
-});
-
-function updateKeyHint() {
-  var hint = document.getElementById("key-hint");
-  if (currentConfig && currentConfig.human_seat !== null) {
-    hint.classList.add("show");
-  } else {
-    hint.classList.remove("show");
-  }
-}
-
-/* ══════════════════════════════════════════════════════════════════
-   GAME CLIENT
-   ══════════════════════════════════════════════════════════════════ */
-
-var EPISODE = -1;
-var FRAMES  = [];
-var INIT    = null;
-var CARDS   = [];
-var CELL    = 24;
-
-var waitingForHuman  = false;
-var humanSeat        = null;
-var actionSubmitted  = false;
-
-var canvas    = document.getElementById("board");
-var ctx       = canvas.getContext("2d");
-var meta      = document.getElementById("meta");
-var wBanner   = document.getElementById("w-banner");
-var turnRo    = document.getElementById("turn-ro");
-var pill      = document.getElementById("pill");
-var sideCol   = document.getElementById("side-col");
-var yourTurn  = document.getElementById("your-turn");
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, function (c) {
+function esc(s){
+  return String(s).replace(/[&<>"']/g, function(c){
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
   });
 }
-
-function setPill(state) {
-  pill.classList.remove("on","off");
-  if (state === "live") { pill.classList.add("on"); pill.textContent = "live"; }
-  else { pill.classList.add("off"); pill.textContent = "offline"; }
+function robotSVG(){
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none"'
+    + ' stroke="currentColor" stroke-width="1.7" stroke-linecap="round"'
+    + ' stroke-linejoin="round"><rect x="4" y="8" width="16" height="11" rx="3"/>'
+    + '<path d="M12 4v4"/><circle cx="12" cy="3" r="1.2" fill="currentColor"/>'
+    + '<circle cx="9" cy="13.5" r="1.3" fill="currentColor" stroke="none"/>'
+    + '<circle cx="15" cy="13.5" r="1.3" fill="currentColor" stroke="none"/>'
+    + '<path d="M9.5 16.5h5"/></svg>';
+}
+function fmtTime(ms){
+  var s = Math.max(0, Math.floor(ms/1000));
+  var m = Math.floor(s/60); s = s % 60;
+  return (m<10?"0":"")+m+":"+(s<10?"0":"")+s;
+}
+function dirName(dr, dc){
+  if (dr===-1) return "N"; if (dr===1) return "S";
+  if (dc===-1) return "W"; if (dc===1) return "E"; return "-";
 }
 
-/* ── canvas drawing ─────────────────────────────────────────────────── */
-function drawFrame(f) {
-  if (!INIT) return;
-  var W = INIT.board_width, H = INIT.board_height;
-  var TILE = INIT.tile_colors, EDGE = INIT.head_edge_colors;
-  ctx.fillStyle = TILE[0];
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  for (var r = 0; r < H; r++) {
-    for (var c = 0; c < W; c++) {
-      var v = f.grid[r * W + c];
-      if (v === 0) continue;
-      ctx.fillStyle = TILE[v];
-      ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
-    }
-  }
-  ctx.strokeStyle = "rgba(255,255,255,0.05)";
-  ctx.lineWidth = 1;
-  for (var i = 1; i < W; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * CELL + .5, 0);
-    ctx.lineTo(i * CELL + .5, canvas.height);
-    ctx.stroke();
-  }
-  for (var j = 1; j < H; j++) {
-    ctx.beginPath();
-    ctx.moveTo(0, j * CELL + .5);
-    ctx.lineTo(canvas.width, j * CELL + .5);
-    ctx.stroke();
-  }
-  for (var p = 0; p < INIT.num_players; p++) {
-    var head = f.heads[p];
-    if (head[0] < 0 || !f.alive[p]) continue;
-    ctx.strokeStyle = EDGE[p];
-    ctx.lineWidth = 3;
-    ctx.strokeRect(head[1]*CELL+1.5, head[0]*CELL+1.5, CELL-3, CELL-3);
+/* ── agent selector bar ───────────────────────────────────────────── */
+function buildSelbar(){
+  var bar = document.getElementById("selbar");
+  bar.innerHTML = "";
+  for (var s = 0; s < NUM_PLAYERS; s++){
+    (function(seat){
+      var chip = document.createElement("div");
+      chip.className = "chip";
+      chip.style.setProperty("--c", SEAT[seat].base);
+      var menu = '<div class="chip-menu">';
+      for (var i = 0; i < PRESETS.length; i++){
+        var p = PRESETS[i];
+        var on = (p.key === LINEUP[seat]) ? " on" : "";
+        menu += '<div class="mi'+on+'" data-key="'+esc(p.key)+'">'
+          + '<div class="mi-name">'+esc(p.label)+'</div>'
+          + '<div class="mi-desc">'+esc(p.description||"")+'</div></div>';
+      }
+      menu += '</div>';
+      var label = PRESET_MAP[LINEUP[seat]] ? PRESET_MAP[LINEUP[seat]].label : LINEUP[seat];
+      chip.innerHTML = '<span class="chip-ic">'+robotSVG()+'</span>'
+        + '<span class="chip-name">'+esc(label)+'</span>'
+        + '<span class="chev">&#x25BE;</span>' + menu;
+      chip.addEventListener("click", function(e){
+        var mi = e.target.closest ? e.target.closest(".mi") : null;
+        if (mi){
+          LINEUP[seat] = mi.dataset.key;
+          chip.classList.remove("open");
+          buildSelbar();
+          startGame();
+          return;
+        }
+        var wasOpen = chip.classList.contains("open");
+        closeMenus();
+        if (!wasOpen) chip.classList.add("open");
+        e.stopPropagation();
+      });
+      bar.appendChild(chip);
+    })(s);
   }
 }
+function closeMenus(){
+  var open = document.querySelectorAll(".chip.open");
+  for (var i = 0; i < open.length; i++) open[i].classList.remove("open");
+}
+document.addEventListener("click", closeMenus);
 
-/* ── side panel ─────────────────────────────────────────────────────── */
-function buildSidePanel(init) {
-  sideCol.innerHTML = "";
-  CARDS = [];
-  for (var s = 0; s < init.num_players; s++) {
-    var agent = init.agents[s];
-    var pc = init.tile_colors[s + 1];
-    var elo = (agent.elo === null || agent.elo === undefined)
-      ? "—" : (agent.elo >= 0 ? "+" : "") + Math.round(agent.elo);
-    var isHuman = (agent.strategy === "human");
-    var card = document.createElement("div");
-    card.className = "agent-card" + (isHuman ? " human-card" : "");
-    card.style.borderLeftColor = pc;
-    card.innerHTML =
-      '<div class="a-head">'
-        + '<span class="a-name">' + esc(agent.name) + '</span>'
-        + '<span class="a-strat">' + esc(agent.strategy) + '</span>'
-      + '</div>'
-      + '<div class="a-stats">'
-        + '<div><div class="k">Seat</div>' + (s+1) + '</div>'
-        + '<div><div class="k">Elo</div>' + elo + '</div>'
-        + '<div><div class="k">Status</div><span class="st">alive</span></div>'
-        + '<div><div class="k">Claimed</div><span class="cl">0</span></div>'
-        + '<div><div class="k">Path</div><span class="pl">0</span></div>'
-        + '<div><div class="k">Win prob</div><span class="pp">0%</span></div>'
-      + '</div>'
-      + '<div class="prob-bar">'
-        + '<div class="prob-fill" style="background:' + pc + '"></div>'
-      + '</div>';
-    sideCol.appendChild(card);
-    CARDS.push({
-      root: card,
-      st:  card.querySelector(".st"),
-      cl:  card.querySelector(".cl"),
-      pl:  card.querySelector(".pl"),
-      pp:  card.querySelector(".pp"),
-      fill:card.querySelector(".prob-fill")
+/* ── stats panel ──────────────────────────────────────────────────── */
+function buildStats(){
+  var box = document.getElementById("stats");
+  box.innerHTML = "";
+  STAT_ROWS = [];
+  for (var s = 0; s < NUM_PLAYERS; s++){
+    var lp = PRESET_MAP[LINEUP[s]] || {label:LINEUP[s], description:""};
+    var name = HUMAN && s === 0 ? "You" : lp.label;
+    var desc = HUMAN && s === 0 ? "Human · arrow keys" : (lp.description||"");
+    var row = document.createElement("div");
+    row.className = "stat-row";
+    row.innerHTML =
+      '<div class="stat-ic" style="color:'+SEAT[s].base+'">'+robotSVG()+'</div>'
+      + '<div class="stat-main"><div class="stat-name">'+esc(name)+'</div>'
+      + '<div class="stat-desc">'+esc(desc)+'</div>'
+      + '<div class="terr"><span class="terr-pct">0.0%</span>'
+      + '<div class="terr-bar"><div class="terr-fill" '
+      + 'style="background:'+SEAT[s].base+'"></div></div></div></div>'
+      + '<div class="stat-right"><div class="status"><span class="dot"></span>'
+      + '<span class="stxt">Alive</span></div>'
+      + '<div class="mini">owned 0 · legal 0</div></div>';
+    box.appendChild(row);
+    STAT_ROWS.push({
+      root: row,
+      pct: row.querySelector(".terr-pct"),
+      fill: row.querySelector(".terr-fill"),
+      status: row.querySelector(".status"),
+      stxt: row.querySelector(".stxt"),
+      mini: row.querySelector(".mini")
     });
   }
 }
+function legalCount(f, seat){
+  if (!f.alive[seat]) return 0;
+  var h = f.heads[seat];
+  if (h[0] < 0) return 0;
+  var W = INIT.board_width, H = INIT.board_height, n = 0;
+  var D = [[-1,0],[1,0],[0,-1],[0,1]];
+  for (var d = 0; d < 4; d++){
+    var rr = h[0]+D[d][0], cc = h[1]+D[d][1];
+    if (rr<0||rr>=H||cc<0||cc>=W) continue;
+    if (f.grid[rr*W+cc] === 0) n++;
+  }
+  return n;
+}
+function updateStats(f){
+  var owned = [], total = 0;
+  for (var s = 0; s < NUM_PLAYERS; s++){
+    owned[s] = f.path_len[s] + f.claimed[s];
+    total += owned[s];
+  }
+  for (s = 0; s < NUM_PLAYERS; s++){
+    var r = STAT_ROWS[s]; if (!r) continue;
+    var pct = total > 0 ? (owned[s]/total*100) : 0;
+    r.pct.textContent = pct.toFixed(1)+"%";
+    r.fill.style.width = pct.toFixed(1)+"%";
+    var lc = legalCount(f, s);
+    r.mini.textContent = "owned "+owned[s]+" · legal "+lc;
+    if (f.alive[s]){
+      r.status.classList.remove("dead"); r.stxt.textContent = "Alive";
+      r.root.classList.remove("dead-row");
+    } else {
+      r.status.classList.add("dead"); r.stxt.textContent = "Dead";
+      r.root.classList.add("dead-row");
+    }
+  }
+}
 
-function updateSide(f) {
+/* ── canvas ───────────────────────────────────────────────────────── */
+function hexA(hex, a){
+  var n = parseInt(hex.slice(1), 16);
+  return "rgba("+((n>>16)&255)+","+((n>>8)&255)+","+(n&255)+","+a+")";
+}
+function drawFrame(f){
   if (!INIT) return;
-  for (var s = 0; s < INIT.num_players; s++) {
-    var c = CARDS[s];
-    if (!c) continue;
-    c.cl.textContent = f.claimed[s];
-    c.pl.textContent = f.path_len[s];
-    var pct = Math.round(f.win_probs[s] * 100);
-    c.pp.textContent = pct + "%";
-    c.fill.style.width = pct + "%";
-    if (f.alive[s]) {
-      c.st.textContent = "alive";
-      c.root.classList.remove("dead");
-    } else {
-      c.st.textContent = "dead";
-      c.root.classList.add("dead");
+  var W = INIT.board_width, H = INIT.board_height;
+  ctx.fillStyle = "#05080f";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (var r = 0; r < H; r++){
+    for (var c = 0; c < W; c++){
+      var v = f.grid[r*W+c];
+      if (v === 0) continue;
+      var seat = v <= 4 ? v-1 : v-5;
+      var isPath = v <= 4;
+      var alive = f.alive[seat];
+      var a = isPath ? 0.96 : 0.62;
+      if (!alive) a *= 0.38;
+      ctx.fillStyle = hexA(SEAT[seat].base, a);
+      ctx.fillRect(c*CELL+0.5, r*CELL+0.5, CELL-1, CELL-1);
     }
-    if (s === f.current_player && !f.done) {
-      c.root.classList.add("current");
-    } else {
-      c.root.classList.remove("current");
-    }
+  }
+  ctx.strokeStyle = "rgba(120,150,210,0.05)";
+  ctx.lineWidth = 1;
+  for (var i = 1; i < W; i++){
+    ctx.beginPath(); ctx.moveTo(i*CELL+0.5, 0);
+    ctx.lineTo(i*CELL+0.5, canvas.height); ctx.stroke();
+  }
+  for (var j = 1; j < H; j++){
+    ctx.beginPath(); ctx.moveTo(0, j*CELL+0.5);
+    ctx.lineTo(canvas.width, j*CELL+0.5); ctx.stroke();
+  }
+  for (var p = 0; p < NUM_PLAYERS; p++){
+    var head = f.heads[p];
+    if (head[0] < 0 || !f.alive[p]) continue;
+    var x = head[1]*CELL, y = head[0]*CELL;
+    ctx.save();
+    ctx.shadowColor = SEAT[p].base; ctx.shadowBlur = 12;
+    ctx.fillStyle = SEAT[p].base;
+    ctx.fillRect(x+CELL*0.18, y+CELL*0.18, CELL*0.64, CELL*0.64);
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+    ctx.strokeRect(x+1.5, y+1.5, CELL-3, CELL-3);
+    ctx.restore();
   }
 }
 
-/* ── applyInit / applyFrame ─────────────────────────────────────────── */
-function applyInit(init) {
+/* ── frame application ────────────────────────────────────────────── */
+function applyInit(init){
   INIT = init;
-  canvas.width  = init.board_width  * CELL;
+  NUM_PLAYERS = init.num_players;
+  CELL = Math.max(6, Math.floor(640 / init.board_width));
+  canvas.width = init.board_width * CELL;
   canvas.height = init.board_height * CELL;
-  meta.textContent = init.board_height + "x" + init.board_width
-      + " board · " + init.num_players + " players";
-  wBanner.classList.remove("active");
-  wBanner.textContent = "Game in progress…";
-  buildSidePanel(init);
+  PREV_HEADS = [];
+  LAST_MOVE = ["-","-","-","-"];
+  gameDone = false; doneAt = 0;
+  document.getElementById("winner").classList.remove("show");
+  buildStats();
 }
-
-function applyFrame(f) {
-  drawFrame(f);
-  updateSide(f);
-  turnRo.textContent = "Turn " + f.turn + " · Frame " + FRAMES.length;
-  if (f.done) {
-    wBanner.classList.add("active");
-    if (f.winner === null || f.winner === undefined) {
-      wBanner.textContent = "Game over — tie.";
-    } else {
-      wBanner.textContent = "Winner: " + esc(INIT.agents[f.winner].name)
-          + " (seat " + (f.winner + 1) + ")";
+function trackMoves(f){
+  for (var s = 0; s < NUM_PLAYERS; s++){
+    var h = f.heads[s];
+    var ph = PREV_HEADS[s];
+    if (ph && h[0] >= 0 && (ph[0] !== h[0] || ph[1] !== h[1])){
+      LAST_MOVE[s] = dirName(h[0]-ph[0], h[1]-ph[1]);
     }
-  } else {
-    wBanner.classList.remove("active");
-    wBanner.textContent = "Game in progress…";
+    PREV_HEADS[s] = [h[0], h[1]];
+  }
+}
+function renderLast(f){
+  drawFrame(f);
+  updateStats(f);
+  document.getElementById("turn-ro").textContent = "Turn " + f.turn;
+  updateDebug(f);
+  if (f.done && !gameDone){
+    gameDone = true; doneAt = Date.now();
+    var w = document.getElementById("winner");
+    var nm = document.getElementById("winner-name");
+    if (f.winner === null || f.winner === undefined){
+      nm.textContent = "Tie"; nm.style.color = "#fff";
+    } else {
+      var lab = PRESET_MAP[LINEUP[f.winner]]
+        ? PRESET_MAP[LINEUP[f.winner]].label : ("Seat "+(f.winner+1));
+      if (HUMAN && f.winner === 0) lab = "You";
+      nm.textContent = lab + " wins"; nm.style.color = SEAT[f.winner].base;
+    }
+    w.classList.add("show");
   }
 }
 
-/* ── polling ────────────────────────────────────────────────────────── */
-function poll() {
-  var url = "/state?episode=" + EPISODE + "&since=" + FRAMES.length;
-  fetch(url, { cache: "no-store" })
-    .then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    })
-    .then(function (j) {
-      setPill("live");
-      if (j.episode !== EPISODE) {
-        EPISODE = j.episode;
-        FRAMES  = [];
-        humanSeat = (j.human_seat === null || j.human_seat === undefined)
-            ? null : j.human_seat;
-        if (j.init) applyInit(j.init);
-      }
-      for (var i = 0; i < j.frames.length; i++) {
-        FRAMES.push(j.frames[i]);
-        applyFrame(j.frames[i]);
-      }
-      var prevWaiting = waitingForHuman;
-      waitingForHuman = !!j.waiting_for_human;
-      if (!waitingForHuman) actionSubmitted = false;
-      if (waitingForHuman && !prevWaiting) {
-        yourTurn.classList.add("show");
-      } else if (!waitingForHuman) {
-        yourTurn.classList.remove("show");
-      }
-    })
-    .catch(function () { setPill("offline"); })
-    .then(function () { setTimeout(poll, 150); });
+/* ── debug panel ──────────────────────────────────────────────────── */
+function updateDebug(f){
+  var d = document.getElementById("debug-drawer");
+  if (!d.classList.contains("show")) return;
+  var aliveN = 0;
+  for (var s = 0; s < NUM_PLAYERS; s++) if (f.alive[s]) aliveN++;
+  var status = f.done
+    ? (f.winner == null ? "done (tie)" : "done (seat "+(f.winner+1)+")")
+    : "running";
+  var rows = ''
+    + line("Turn", f.turn)
+    + line("Status", status)
+    + line("Alive", aliveN + " / " + NUM_PLAYERS)
+    + line("Current seat", f.current_player + 1);
+  for (s = 0; s < NUM_PLAYERS; s++){
+    var lp = PRESET_MAP[LINEUP[s]] ? PRESET_MAP[LINEUP[s]].label : LINEUP[s];
+    var v = esc(lp) + " · " + (f.alive[s] ? "alive" : "dead")
+      + " · move " + LAST_MOVE[s] + " · legal " + legalCount(f, s);
+    rows += line("Seat " + (s+1), v);
+  }
+  document.getElementById("dbg-grid").innerHTML = rows;
+}
+function line(k, v){
+  return '<div class="dbg-line"><span class="dbg-k">'+esc(k)+'</span>'
+    + '<span>'+esc(v)+'</span></div>';
 }
 
-/* ── arrow-key handler ──────────────────────────────────────────────── */
-// DIRECTIONS = (N=0, S=1, W=2, E=3) matching engine constants.py
-var KEY_MAP = { ArrowUp: 0, ArrowDown: 1, ArrowLeft: 2, ArrowRight: 3 };
+/* ── controls ─────────────────────────────────────────────────────── */
+var PLAY_ICON = "&#x25B6;", PAUSE_ICON = "&#x2759;&#x2759;";
+function setPlayIcon(){
+  document.getElementById("play-btn").innerHTML = serverPaused ? PLAY_ICON : PAUSE_ICON;
+}
+function control(cmd, extra){
+  var body = {cmd: cmd};
+  if (extra) for (var k in extra) body[k] = extra[k];
+  fetch("/control", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(body), cache:"no-store"})
+    .catch(function(){});
+}
+function startGame(){
+  var agents = {};
+  for (var s = 0; s < NUM_PLAYERS; s++) agents[String(s)] = LINEUP[s];
+  matchStart = Date.now(); gameDone = false; doneAt = 0;
+  var cfg = {
+    mode: HUMAN ? "play" : "watch",
+    board_size: BOARD_SIZE, num_players: NUM_PLAYERS, fps: BASE_FPS,
+    human_seat: HUMAN ? 0 : null, agents: agents,
+    autoplay: true, speed: SPEED
+  };
+  fetch("/start", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(cfg), cache:"no-store"}).catch(function(){});
+  document.getElementById("kbd-hint").classList.toggle("show", HUMAN);
+}
+document.getElementById("play-btn").addEventListener("click", function(){
+  control(serverPaused ? "play" : "pause");
+});
+document.getElementById("step-btn").addEventListener("click", function(){
+  control("step");
+});
+document.getElementById("reset-btn").addEventListener("click", function(){
+  startGame();
+});
+document.getElementById("speed-sel").addEventListener("change", function(e){
+  SPEED = parseFloat(e.target.value);
+  control("speed", {speed: SPEED});
+});
 
-document.addEventListener("keydown", function (e) {
+/* ── header drawers ───────────────────────────────────────────────── */
+document.getElementById("menu-btn").addEventListener("click", function(){
+  document.getElementById("settings-drawer").classList.remove("show");
+  document.getElementById("debug-drawer").classList.toggle("show");
+});
+document.getElementById("settings-btn").addEventListener("click", function(){
+  document.getElementById("debug-drawer").classList.remove("show");
+  document.getElementById("settings-drawer").classList.toggle("show");
+});
+(function(){
+  var row = document.getElementById("size-row");
+  var btns = row.querySelectorAll(".seg");
+  for (var i = 0; i < btns.length; i++){
+    btns[i].addEventListener("click", function(e){
+      for (var j = 0; j < btns.length; j++) btns[j].classList.remove("on");
+      e.target.classList.add("on");
+    });
+  }
+})();
+document.getElementById("apply-settings").addEventListener("click", function(){
+  var on = document.querySelector("#size-row .seg.on");
+  BOARD_SIZE = on ? parseInt(on.dataset.val, 10) : 32;
+  HUMAN = document.getElementById("human-chk").checked;
+  document.getElementById("settings-drawer").classList.remove("show");
+  startGame();
+});
+
+/* ── bottom nav ───────────────────────────────────────────────────── */
+(function(){
+  var items = document.querySelectorAll(".nav-item");
+  for (var i = 0; i < items.length; i++){
+    items[i].addEventListener("click", function(e){
+      var view = e.currentTarget.dataset.view;
+      for (var j = 0; j < items.length; j++) items[j].classList.remove("on");
+      e.currentTarget.classList.add("on");
+      document.getElementById("arena-view").style.display =
+        view === "arena" ? "block" : "none";
+      document.getElementById("agents-view").classList.toggle("show", view === "agents");
+      document.getElementById("history-view").classList.toggle("show", view === "history");
+    });
+  }
+})();
+
+/* ── arrow-key / WASD handler ─────────────────────────────────────── */
+var KEY_MAP = {
+  ArrowUp:0, ArrowDown:1, ArrowLeft:2, ArrowRight:3,
+  w:0, s:1, a:2, d:3, W:0, S:1, A:2, D:3
+};
+document.addEventListener("keydown", function(e){
   if (!waitingForHuman || actionSubmitted) return;
   var action = KEY_MAP[e.key];
   if (action === undefined) return;
   e.preventDefault();
   actionSubmitted = true;
-  yourTurn.classList.remove("show");
-  fetch("/action", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: action }),
-    cache: "no-store"
-  }).catch(function () {
-    // Allow retry if the POST failed.
-    actionSubmitted = false;
-  });
+  fetch("/action", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({action: action}), cache:"no-store"})
+    .catch(function(){ actionSubmitted = false; });
 });
 
-setPill("offline");
-poll();
+/* ── polling ──────────────────────────────────────────────────────── */
+function poll(){
+  fetch("/state?episode=" + EPISODE + "&since=" + FRAMES.length, {cache:"no-store"})
+    .then(function(r){ if (!r.ok) throw new Error("http"); return r.json(); })
+    .then(function(j){
+      if (j.episode !== EPISODE){
+        EPISODE = j.episode; FRAMES = [];
+        if (j.init) applyInit(j.init);
+      }
+      var last = null;
+      for (var i = 0; i < j.frames.length; i++){
+        var f = j.frames[i];
+        FRAMES.push(f); trackMoves(f); last = f;
+      }
+      if (last) renderLast(last);
+      serverPaused = !!j.paused;
+      setPlayIcon();
+      waitingForHuman = !!j.waiting_for_human;
+      if (!waitingForHuman) actionSubmitted = false;
+    })
+    .catch(function(){})
+    .then(function(){ setTimeout(poll, 150); });
+}
+function tickTime(){
+  var end = gameDone && doneAt ? doneAt : Date.now();
+  if (matchStart) document.getElementById("time-ro").textContent = fmtTime(end - matchStart);
+}
+setInterval(tickTime, 250);
+
+/* ── boot ─────────────────────────────────────────────────────────── */
+fetch("/agents", {cache:"no-store"})
+  .then(function(r){ return r.json(); })
+  .then(function(j){ PRESETS = j.presets || []; })
+  .catch(function(){
+    PRESETS = [
+      {key:"random", label:"Random", description:"Random walk."},
+      {key:"greedy", label:"Greedy", description:"1-ply heuristic."}
+    ];
+  })
+  .then(function(){
+    for (var i = 0; i < PRESETS.length; i++) PRESET_MAP[PRESETS[i].key] = PRESETS[i];
+    var valid = {};
+    for (i = 0; i < PRESETS.length; i++) valid[PRESETS[i].key] = true;
+    for (var s = 0; s < LINEUP.length; s++){
+      if (!valid[LINEUP[s]]) LINEUP[s] = PRESETS.length ? PRESETS[0].key : "greedy";
+    }
+    buildSelbar();
+    setPlayIcon();
+    startGame();
+    poll();
+  });
 })();
 </script>
 </body>

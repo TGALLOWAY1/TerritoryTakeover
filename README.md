@@ -61,12 +61,26 @@ incidental — the point is the method.
 and the curriculum AlphaZero reference checkpoint (at 4 PUCT iters).
 Regenerate with `python scripts/record_demo.py --seed 0`.*
 
-To **watch gameplay live in a browser** (no recording, no extra deps),
-run `python scripts/serve_live_demo.py` and open the printed URL. The
-page streams each move as it is played, shows per-seat win-probability
-bars, and exposes a Reset button that starts a fresh game. Pick agents
-with `--seat0`/`--seat1` (`random` / `greedy` / `rave`); see
-`scripts/serve_live_demo.py --help` for all flags.
+To **play in a browser**, run `python scripts/play_interactive.py` and open
+the printed URL. This launches the **Arena** — a polished, mobile-first
+front end (single self-contained page, no build tooling, no extra deps)
+that drives the real enclosure engine:
+
+- A match auto-starts with four agents in the four corners.
+- **Swap any agent's strategy** from its dropdown in the selector bar
+  (`Random` / `Greedy` / `MCTS Easy/Medium/Hard`); swapping resets the match.
+- **Play / pause / step / speed** controls (0.5×–20×) drive the simulation;
+  *step* advances exactly one move and the turn counter + elapsed timer update live.
+- A live **stats panel** shows each seat's territory % (visited + enclosed cells),
+  owned-cell count, legal-move count, and alive/dead status.
+- The header **menu** button reveals a debug panel (turn, alive seats, last move,
+  and legal moves per seat); the **gear** opens settings (board size, and an
+  optional "play seat 1 yourself" mode with arrow keys / WASD).
+
+To **watch a scripted spectator stream** instead (lighter-weight, no controls),
+run `python scripts/serve_live_demo.py`; it streams each move with per-seat
+win-probability bars and a Reset button. Pick agents with `--seat0`/`--seat1`
+(`random` / `greedy` / `rave`); see `scripts/serve_live_demo.py --help`.
 
 ![Agent behavior gallery: Random / Greedy / UCT@200 / RAVE@200 self-play at turn 100, 20×20, seed 0](docs/assets/agent_gallery.png)
 
