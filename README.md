@@ -264,8 +264,8 @@ Experiment writeups:
 
 Phase-level research narrative:
 
-- [`KEY_FINDINGS.md`](KEY_FINDINGS.md) — running lab notebook (Phase 3a / 3c / 3d).
-- [`PHASE3_SUMMARY.md`](PHASE3_SUMMARY.md) — cross-phase synthesis + deferrals.
+- [`docs/06-history/archive/KEY_FINDINGS.md`](docs/06-history/archive/KEY_FINDINGS.md) — running lab notebook (Phase 3a / 3c / 3d).
+- [`docs/06-history/archive/PHASE3_SUMMARY.md`](docs/06-history/archive/PHASE3_SUMMARY.md) — cross-phase synthesis + deferrals.
 - [`docs/phase3a/`](docs/phase3a/) — Phase-3a game-state screenshots
   (8×8 2-player and 10×10 4-player boards across `vs_random`,
   `vs_greedy`, `vs_uct` matchups) plus per-seed `eval_curves.csv` and

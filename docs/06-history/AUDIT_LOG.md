@@ -32,4 +32,32 @@ appended as phases complete. Each entry follows a fixed schema.
 
 ---
 
+## Audit Entry — Documentation Infrastructure, Phases 2–8
+
+- **Date:** 2026-05-28
+- **Scope:** Product/feature inventory, entrypoints & flows, architecture & system map, quality/
+  risk/debt/testing, planning/backlog, AI-context protocol, decision/change history + archive.
+- **Agent:** Claude Code (main agent + earlier Explore subagents).
+- **Summary:** Built the lean `docs/00-08` system tailored to a Python research library. Mapped
+  web-template sections to library equivalents; documented all 19 scripts + HTTP demo endpoints;
+  produced architecture/data-model/API/encoding/integration docs (validated Mermaid system map);
+  wrote testing strategy, known issues, technical debt, risk register, regression checklist, and
+  security notes; derived a scored backlog + ready-to-run next-agent tasks; added context-loading
+  protocol + agent workflow; synthesized a decision log and changelog; archived narrative docs.
+- **Files inspected:** `src/territory_takeover/**` (incl. `rl/*/spaces.py`, `rl/alphazero/train.py`,
+  `viz_*.py` routing), all `scripts/*.py`, `README.md`, `docs/adr/*`, `portfolio-readiness-audit/*`.
+- **Docs changed:** created `docs/01-product/*`, `docs/02-architecture/*`,
+  `docs/03-implementation/{ENTRYPOINTS_AND_SCRIPTS,TESTING_STRATEGY}.md`, `docs/04-quality/*`,
+  `docs/05-planning/*`, `docs/07-ai-context/*`, `docs/06-history/{DECISION_LOG,CHANGELOG_NOTES}.md`;
+  edited root `CLAUDE.md` (pointer) and `README.md` (archive links); moved `KEY_FINDINGS.md`,
+  `PHASE3_SUMMARY.md`, `portfolio-readiness-audit/` into `docs/06-history/archive/`.
+- **Findings:** only one `src` TODO (AlphaZero gating, `train.py:207-210`); 41 `Any` usages
+  (mostly HTTP/MP payloads); README markdown links to moved files updated; ADR plain-text mentions
+  left intact (immutable). PPO has no training driver (Partial).
+- **Open questions:** none blocking; perf targets remain manually verified, not CI-gated.
+- **Next recommended action:** Phase 9 (visual artifacts + manifest) and Phase 10 (index + README pointer).
+- **Commit:** `docs: add decision history and archive narrative docs`
+
+---
+
 <!-- Append later-phase entries above this line, newest first, or below in order. -->
