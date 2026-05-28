@@ -71,3 +71,23 @@ These numbers drive implementation choices — e.g. BFS uses an explicit `deque`
 - Test style is pytest function-based (no classes, no fixtures beyond trivial helpers). Parametrized tests are currently avoided because mypy strict + missing `pytest` stubs flags `@pytest.mark.parametrize` as an untyped decorator — prefer an internal loop over `range(N)` with `f"trial={i}"` assertion messages.
 - Ruff rule set: `E, F, I, B, UP, N, SIM, RUF, ANN, TID` with `line-length = 100`. `ANN` is disabled for `tests/*`.
 - Prefer extending `PlayerState`/`GameState` in place over introducing parallel structures — the cheap-copy semantics depend on knowing exactly what to duplicate.
+
+## Documentation system & agent context
+
+This repo carries a structured documentation system under `docs/` (the `00-overview` …
+`08-visuals` tree). It is the first place to look before coding and the place to update
+after coding.
+
+- **Start here / full map:** [`docs/00-overview/DOCUMENTATION_INDEX.md`](docs/00-overview/DOCUMENTATION_INDEX.md)
+  and [`docs/00-overview/PROJECT_SNAPSHOT.md`](docs/00-overview/PROJECT_SNAPSHOT.md).
+- **Load minimal context for your task** (don't read everything):
+  [`docs/07-ai-context/CONTEXT_LOADING_PROTOCOL.md`](docs/07-ai-context/CONTEXT_LOADING_PROTOCOL.md).
+- **How to work here** (inspect → change → verify → document → commit; status-label discipline;
+  protecting user changes): [`docs/07-ai-context/AGENT_WORKFLOW.md`](docs/07-ai-context/AGENT_WORKFLOW.md).
+- **Before merging:** [`docs/04-quality/REGRESSION_CHECKLIST.md`](docs/04-quality/REGRESSION_CHECKLIST.md).
+- **Architecture rationale:** [`docs/adr/`](docs/adr/README.md) and
+  [`docs/06-history/DECISION_LOG.md`](docs/06-history/DECISION_LOG.md).
+
+When you change behavior, update the matching doc and use the exact status labels
+(`Implemented` / `Partial` / `Stubbed` / `Broken` / `Designed only` / `Deprecated` / `Unknown`).
+Mark planned/stubbed work honestly — never as Implemented.
