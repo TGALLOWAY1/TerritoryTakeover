@@ -244,6 +244,13 @@ training config is mirrored at
 
 ## Further reading
 
+**Documentation system.** A structured, navigable docs tree lives under
+[`docs/`](docs/00-overview/DOCUMENTATION_INDEX.md) — start at the
+[documentation index](docs/00-overview/DOCUMENTATION_INDEX.md) or the
+[project snapshot](docs/00-overview/PROJECT_SNAPSHOT.md). It covers product/feature status,
+architecture, public API, quality/risks, planning, visuals, and an AI-agent context protocol.
+New contributors and agents should start there.
+
 Architecture and conventions:
 
 - [`CLAUDE.md`](CLAUDE.md) — tile encoding, state split, engine entry
