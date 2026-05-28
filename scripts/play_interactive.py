@@ -1,8 +1,9 @@
-"""Launch the interactive TerritoryTakeover frontend.
+"""Launch the Territory Takeover *Arena* frontend.
 
-Opens a browser-based UI where you can:
-  - Watch agents of configurable strength play each other, or
-  - Take control of seat 1 with arrow keys against AI opponents (Tron-style).
+Opens a browser-based UI that auto-starts a four-agent match where you can:
+  - Watch agents battle, swapping any agent's strategy from a dropdown,
+  - Drive the simulation with play / pause / step / speed / reset, and
+  - Optionally take control of seat 1 with arrow keys / WASD (Settings → Play).
 
 Usage::
 
@@ -27,16 +28,17 @@ import webbrowser
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Serve the interactive TerritoryTakeover frontend.",
+        description="Serve the Territory Takeover Arena frontend.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Once running, open the printed URL in a browser.\n"
-            "Use the setup form to choose mode, board size, and opponent strength."
+            "A match auto-starts; swap agents from the selector bar and use the\n"
+            "play / pause / step / speed / reset controls below the board."
         ),
     )
     p.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     p.add_argument("--port", type=int, default=8000, help="TCP port (default: 8000)")
-    p.add_argument("--title", default="TerritoryTakeover", help="Page title")
+    p.add_argument("--title", default="Territory Takeover", help="Page title")
     p.add_argument(
         "--no-browser",
         action="store_true",
@@ -53,9 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     server = InteractiveServer(host=args.host, port=args.port, title=args.title)
     server.start()
 
-    print(f"[interactive] serving at {server.url}")
-    print("[interactive] use the setup form in the browser to start a game")
-    print("[interactive] press Ctrl-C to stop")
+    print(f"[arena] serving at {server.url}")
+    print("[arena] a match auto-starts; swap agents and use the controls in the browser")
+    print("[arena] press Ctrl-C to stop")
 
     if not args.no_browser:
         threading.Timer(0.4, lambda: webbrowser.open(server.url)).start()

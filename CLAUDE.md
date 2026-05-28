@@ -66,6 +66,17 @@ The grid is the source of truth for rendering; `path_set` and `claimed_count` ar
 
 These numbers drive implementation choices — e.g. BFS uses an explicit `deque` with an `np.bool_` mask (no recursion: 40×40 would blow Python's 1000-frame limit), and `reset` reuses the grid buffer.
 
+### Visualization & front end (`src/territory_takeover/viz*.py`)
+
+All rendering is pure-Python, no JS build tooling. `viz.py` holds the canonical palettes (`TILE_COLORS`, `HEAD_EDGE_COLORS`) plus ASCII/matplotlib renderers; `viz_html.py` builds the JSON frame payload (`_frame_payload`) and static replays; `viz_live.py` streams a scripted spectator game.
+
+The **Arena** front end is `viz_interactive.py` — a single self-contained HTML/CSS/JS page (inline strings) served by a stdlib `ThreadingHTTPServer`, launched via `scripts/play_interactive.py`. It drives the *real* engine, so the territory model is the engine's own: a cell is owned by a player once visited (its path) and stays owned, plus enclosed cells — a seat's territory shown in the UI is `len(path) + claimed_count`.
+
+- **Endpoints**: `GET /` (page), `GET /state?episode&since` (incremental frame poll; includes `paused`/`speed`/`waiting_for_human`/`human_seat`), `GET /agents` (preset key/label/description), `POST /start` (config body), `POST /control` (`{"cmd": play|pause|step|reset|speed}`), `POST /action` (human move 0–3).
+- **Pacing model**: the game runs in a background thread. In watch mode it blocks in `_wait_to_step()` (guarded by `_ctrl_cond`) until a control command lets it proceed; *step* requests advance exactly one engine move (one seat) and then re-pause; *speed* scales the pacing sleep (`1/(base_fps*speed)`). Play mode (a human in seat 0) keeps the existing arrow-key flow and ignores pause. `start_game` stores `_last_config` so `cmd=reset` can restart the same lineup.
+- **Client-derived stats**: territory %, legal-move counts, and last-move direction are computed in the browser from the existing frame keys (`grid`/`heads`/`alive`/`path_len`/`claimed`) — do **not** change `_frame_payload`'s schema, which `tests/test_viz_html.py` pins. Agent presets live in `AGENT_PRESETS` (`viz_interactive.py`); `_build_agent` maps a preset key to a registry agent.
+- **Inline assets caveat**: every physical line in the template strings still counts toward ruff `line-length = 100`, so keep embedded CSS/JS lines wrapped.
+
 ## Conventions
 
 - Test style is pytest function-based (no classes, no fixtures beyond trivial helpers). Parametrized tests are currently avoided because mypy strict + missing `pytest` stubs flags `@pytest.mark.parametrize` as an untyped decorator — prefer an internal loop over `range(N)` with `f"trial={i}"` assertion messages.
