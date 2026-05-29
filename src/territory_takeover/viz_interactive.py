@@ -17,9 +17,15 @@ Endpoints (all served from one process, no build tooling):
 - ``GET  /state``   — incremental frame poll (adds ``paused``/``speed`` plus
                       ``waiting_for_human``/``human_seat`` to the viz_live shape)
 - ``GET  /agents``  — available strategy presets (key/label/description)
+- ``GET  /healthz`` — liveness probe (always open, for cloud health checks)
 - ``POST /start``   — start a match from a JSON config body
 - ``POST /control`` — ``{"cmd": play|pause|step|reset|speed, "speed"?: float}``
 - ``POST /action``  — submit a human move (``{"action": 0|1|2|3}``)
+
+An optional shared access token (``InteractiveServer(token=...)``) gates every
+endpoint except ``/healthz``; clients present it via the ``token`` query param,
+an ``X-Arena-Token`` header, or a ``tt_token`` cookie. When the token is ``None``
+(the default) all endpoints are open, which suits localhost use.
 
 Typical usage::
 
@@ -38,12 +44,14 @@ Typical usage::
 from __future__ import annotations
 
 import contextlib
+import hmac
 import html as _html
 import json
 import queue
 import threading
 import time
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import parse_qs, urlsplit
@@ -187,10 +195,17 @@ class InteractiveServer:
         host: str = "127.0.0.1",
         port: int = 8000,
         title: str = "Territory Takeover",
+        token: str | None = None,
     ) -> None:
         self._host = host
         self._port = port
         self._title = title
+        # Optional shared access token. When None, all endpoints are open
+        # (fine for localhost); when set, every request must present it via
+        # the ``token`` query param, ``X-Arena-Token`` header, or ``tt_token``
+        # cookie. Empty strings are treated as "no token" so a blank env var
+        # does not silently lock everyone out.
+        self._token = token or None
 
         # Frame buffer shared with the HTTP handler (guarded by _lock).
         self._lock = threading.Lock()
@@ -532,8 +547,46 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
         def log_message(self, format: str, *args: Any) -> None:  # noqa: ANN401
             del format, args
 
+        def _provided_token(self) -> str | None:
+            """Extract a candidate token from query, header, or cookie."""
+            qs = parse_qs(urlsplit(self.path).query)
+            tokens = qs.get("token")
+            if tokens:
+                return tokens[0]
+            header = self.headers.get("X-Arena-Token")
+            if header:
+                return header
+            raw_cookie = self.headers.get("Cookie")
+            if raw_cookie:
+                jar: SimpleCookie = SimpleCookie()
+                jar.load(raw_cookie)
+                if "tt_token" in jar:
+                    return jar["tt_token"].value
+            return None
+
+        def _check_auth(self) -> bool:
+            """True if no token is configured or the request presents it."""
+            expected = server._token
+            if expected is None:
+                return True
+            provided = self._provided_token()
+            if provided is None:
+                return False
+            return hmac.compare_digest(provided, expected)
+
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
+            # Liveness probe for cloud health checks — always open (no token),
+            # so deploys stay healthy even when an access token is configured.
+            if path == "/healthz":
+                self._send_json(HTTPStatus.OK, {"ok": True})
+                return
+            if not self._check_auth():
+                if path in ("/", "/index.html"):
+                    self._serve_login()
+                else:
+                    self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                return
             if path in ("/", "/index.html"):
                 self._serve_index()
             elif path == "/state":
@@ -553,6 +606,9 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:
             path = urlsplit(self.path).path
+            if not self._check_auth():
+                self._send_json(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
+                return
             if path == "/start":
                 body = self._read_json_body()
                 if body is None:
@@ -630,6 +686,26 @@ def _make_handler(server: InteractiveServer) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            # If the token arrived via the URL, persist it as a cookie so the
+            # page's polling/control fetches authenticate automatically and the
+            # token drops out of the address bar on the next navigation.
+            if server._token is not None:
+                qs = parse_qs(urlsplit(self.path).query)
+                if qs.get("token", [None])[0] == server._token:
+                    cookie = (
+                        f"tt_token={server._token}; Path=/; SameSite=Strict; "
+                        "Max-Age=604800"
+                    )
+                    self.send_header("Set-Cookie", cookie)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _serve_login(self) -> None:
+            body = _LOGIN_PAGE.encode("utf-8")
+            self.send_response(HTTPStatus.UNAUTHORIZED)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
@@ -667,11 +743,59 @@ def render_interactive_html(title: str) -> str:
     return _TEMPLATE.replace(_TITLE_MARKER, _html.escape(title))
 
 
+# Shown (HTTP 401) when an access token is required but missing/invalid. The
+# form simply reloads ``/?token=...``; on success the server sets the cookie.
+_LOGIN_PAGE: Final[str] = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#070a12"/>
+<title>Access required</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#070a12;color:#e8edf7;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,sans-serif}
+.wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.card{width:100%;max-width:340px;background:linear-gradient(180deg,#0f1626,#131c30);
+  border:1px solid #1d2944;border-radius:16px;padding:22px;
+  box-shadow:0 10px 30px rgba(0,0,0,.35)}
+h1{font-size:18px;margin:0 0 4px;letter-spacing:1px}
+p{font-size:13px;color:#8a96b0;margin:0 0 16px}
+input{width:100%;padding:12px;font-size:15px;border-radius:10px;
+  background:#0b1220;border:1px solid #1d2944;color:#e8edf7;margin-bottom:12px}
+button{width:100%;padding:12px;font-size:15px;font-weight:700;border:none;
+  border-radius:10px;background:#3b82f6;color:#fff;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card">
+<h1>Territory Takeover</h1>
+<p>Enter the access token to view the arena.</p>
+<form onsubmit="go(event)">
+<input id="t" type="password" autocomplete="off" placeholder="Access token" autofocus/>
+<button type="submit">Enter</button>
+</form>
+</div></div>
+<script>
+function go(e){e.preventDefault();
+  var v=document.getElementById("t").value;
+  location.href="/?token="+encodeURIComponent(v);}
+</script>
+</body>
+</html>
+"""
+
+
 _TEMPLATE: Final[str] = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#070a12"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <title>__TT_ITITLE__</title>
 <style>
 :root{
@@ -680,6 +804,8 @@ _TEMPLATE: Final[str] = """<!DOCTYPE html>
   --s0:#ff6a3d; --s1:#a855f7; --s2:#22c55e; --s3:#3b82f6;
 }
 *{box-sizing:border-box}
+/* Kill the 300ms tap delay / double-tap zoom on interactive controls. */
+.icon-btn,.chip,.ctl,.seg,.mi,.speed-sel{touch-action:manipulation}
 html,body{margin:0;background:var(--bg);color:var(--ink)}
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,sans-serif;
@@ -844,6 +970,18 @@ canvas{width:100%;height:auto;display:block;border-radius:10px;background:#05080
 .kbd-hint{display:none;text-align:center;font-size:11px;color:var(--mut2);
   margin-bottom:12px}
 .kbd-hint.show{display:block}
+
+/* very small phones — tighten gaps so the control row / agent grid fit */
+@media (max-width:360px){
+  .app{padding:10px 10px 80px}
+  .selbar{gap:6px}
+  .chip{padding:8px;gap:6px}
+  .chip-name{font-size:12px}
+  .controls{gap:6px;padding:8px}
+  .ctl{width:40px;height:40px}
+  .speed-sel{height:38px;padding:0 6px}
+  .title{font-size:18px;letter-spacing:2px}
+}
 </style>
 </head>
 <body>

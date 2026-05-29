@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -299,3 +300,63 @@ def test_reset_control_restarts_match() -> None:
         ep0 = _full_state(base)["episode"]
         _post_json(f"{base}/control", {"cmd": "reset"})
         assert _wait_until(lambda: _full_state(base)["episode"] != ep0)
+
+
+# ---------------------------------------------------------------------------
+# Shared-token access control
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def _token_server(token: str) -> Iterator[InteractiveServer]:
+    server = InteractiveServer(host="127.0.0.1", port=0, token=token)
+    server.start()
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
+def _status_for(url: str, headers: dict[str, str] | None = None) -> int:
+    req = urllib.request.Request(url, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            return int(resp.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+
+
+def test_no_token_leaves_endpoints_open() -> None:
+    with _running_server() as server:
+        base = server.url.rstrip("/")
+        assert _status_for(f"{base}/") == 200
+        assert _status_for(f"{base}/agents") == 200
+
+
+def test_token_required_when_configured() -> None:
+    with _token_server("s3cret") as server:
+        base = server.url.rstrip("/")
+        # No credentials -> rejected (page shows login, API returns 401).
+        assert _status_for(f"{base}/") == 401
+        assert _status_for(f"{base}/agents") == 401
+        # Healthz is always open so cloud probes pass.
+        assert _status_for(f"{base}/healthz") == 200
+        # Wrong token -> rejected.
+        assert _status_for(f"{base}/agents?token=nope") == 401
+
+
+def test_token_accepted_via_query_header_and_cookie() -> None:
+    with _token_server("s3cret") as server:
+        base = server.url.rstrip("/")
+        assert _status_for(f"{base}/agents?token=s3cret") == 200
+        assert _status_for(f"{base}/agents", {"X-Arena-Token": "s3cret"}) == 200
+        assert _status_for(f"{base}/agents", {"Cookie": "tt_token=s3cret"}) == 200
+
+
+def test_index_sets_cookie_when_token_in_query() -> None:
+    with _token_server("s3cret") as server:
+        base = server.url.rstrip("/")
+        req = urllib.request.Request(f"{base}/?token=s3cret")
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            cookie = resp.headers.get("Set-Cookie", "")
+        assert "tt_token=s3cret" in cookie
+        assert "SameSite=Strict" in cookie

@@ -1,0 +1,20 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+
+# Heavy artifacts not needed to serve the arena.
+results
+experiments
+benchmarks
+portfolio-readiness-audit
+docs/assets
+docs/experiments
+*.csv
+*.gif
+tests

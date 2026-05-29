@@ -77,6 +77,31 @@ that drives the real enclosure engine:
   and legal moves per seat); the **gear** opens settings (board size, and an
   optional "play seat 1 yourself" mode with arrow keys / WASD).
 
+### Watch from your phone
+
+The Arena is mobile-first, so you can watch agents compete from a phone — you
+just need the server reachable from your device. Three options:
+
+1. **Same Wi-Fi (quickest).** Run
+   `python scripts/play_interactive.py --host 0.0.0.0` and open
+   `http://<your-computer-LAN-IP>:8000/` on the phone.
+2. **Cloud deploy (anywhere, recommended).** A `Dockerfile` and `render.yaml`
+   are included. Push the repo to GitHub and create a Render *Blueprint* (or use
+   any container host / Fly.io), set the `TT_ARENA_TOKEN` secret, then open
+   `https://<your-app>/?token=<TT_ARENA_TOKEN>` on the phone. The container reads
+   `$PORT` and binds `0.0.0.0` automatically. Run a **single instance only** — the
+   match state lives in one process's memory.
+3. **Local Docker smoke test.**
+   `docker build -t tt-arena . && docker run -e TT_ARENA_TOKEN=secret -p 8000:8000 tt-arena`,
+   then open `http://localhost:8000/?token=secret`.
+
+**Access token.** Pass `--token <secret>` (or set `$TT_ARENA_TOKEN`) to require a
+shared token on every request — recommended whenever the server is reachable
+beyond localhost. Open the page once with `?token=<secret>`; the token is stored
+in a cookie so later requests authenticate automatically. `GET /healthz` stays
+open for platform health checks. Today the phone experience is **watch-only**;
+playing a seat by touch is tracked in [`BACKLOG.md`](BACKLOG.md).
+
 To **watch a scripted spectator stream** instead (lighter-weight, no controls),
 run `python scripts/serve_live_demo.py`; it streams each move with per-seat
 win-probability bars and a Reset button. Pick agents with `--seat0`/`--seat1`

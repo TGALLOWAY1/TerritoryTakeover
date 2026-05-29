@@ -1,0 +1,21 @@
+# Render.com blueprint for the Territory Takeover Arena.
+#
+# Deploy: push this repo to GitHub, then in the Render dashboard choose
+# "New > Blueprint" and point it at the repo. After the first deploy, set
+# TT_ARENA_TOKEN to a secret value in the service's Environment tab and open
+#   https://<your-service>.onrender.com/?token=<TT_ARENA_TOKEN>
+#
+# The arena keeps game state in one process's memory and runs a background
+# game thread, so it MUST stay a single instance — do not enable autoscaling.
+services:
+  - type: web
+    name: territory-takeover-arena
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    numInstances: 1
+    healthCheckPath: /healthz
+    envVars:
+      # Render injects $PORT; play_interactive.py reads it automatically.
+      - key: TT_ARENA_TOKEN
+        sync: false # set as a secret in the dashboard
