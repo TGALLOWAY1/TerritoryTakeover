@@ -63,9 +63,9 @@ CPU thread. Final Q-table: 7 909 states.
 
 Training curves (from `docs/phase3a/8x8_2p_seed0_*.png`):
 
-![vs Random](docs/phase3a/8x8_2p_seed0_vs_random.png)
-![vs Greedy](docs/phase3a/8x8_2p_seed0_vs_greedy.png)
-![vs UCT-32](docs/phase3a/8x8_2p_seed0_vs_uct.png)
+![vs Random](../../phase3a/8x8_2p_seed0_vs_random.png)
+![vs Greedy](../../phase3a/8x8_2p_seed0_vs_greedy.png)
+![vs UCT-32](../../phase3a/8x8_2p_seed0_vs_uct.png)
 
 ### What the curves actually show
 
@@ -144,8 +144,8 @@ baseline = 0.25):
 Both are well above the 0.25 uniform baseline — the agent does learn
 *something* on 10×10/4p, modestly. Curves (`docs/phase3a/10x10_4p_seed0_*.png`):
 
-![10×10 vs Random](docs/phase3a/10x10_4p_seed0_vs_random.png)
-![10×10 vs Greedy](docs/phase3a/10x10_4p_seed0_vs_greedy.png)
+![10×10 vs Random](../../phase3a/10x10_4p_seed0_vs_random.png)
+![10×10 vs Greedy](../../phase3a/10x10_4p_seed0_vs_greedy.png)
 
 - **State explosion is real.** 14 502 unique keys after only 100 000
   episodes, versus 7 909 after 500 000 episodes on 8×8/2p. The 10×10/4p
