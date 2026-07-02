@@ -17,7 +17,7 @@ places:
    degrade play quality. Seeded via the passed ``rng`` for reproducibility.
 
 Terminal leaves use :func:`_terminal_value_normalized`, which maps the
-existing ``(path + claimed) / board_area`` vector (in ``[0, 1]``) to
+existing ``territory / board_area`` vector (in ``[0, 1]``) to
 ``[-1, 1]`` via ``2 * x - 1`` so targets match the network's tanh range.
 
 :class:`AlphaZeroAgent` wraps :func:`puct_search` into the package's

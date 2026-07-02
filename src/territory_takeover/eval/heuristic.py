@@ -12,16 +12,15 @@ Perf invariant: the Voronoi partition is computed **exactly once** per
 from __future__ import annotations
 
 import math
-from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from territory_takeover.constants import DIRECTIONS, EMPTY
 from territory_takeover.eval.features import (
-    enclosure_potential,
+    _solo_reachable_empties,
+    claiming_mobility,
     head_opponent_distance,
     mobility,
     territory_total,
@@ -32,9 +31,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from territory_takeover.state import GameState
-
-
-DEAD_SENTINEL: Final[float] = -1e6
 
 
 @dataclass(slots=True)
@@ -70,11 +66,12 @@ class LinearEvaluator:
     scoring loop (``self.weights`` still retains them as the source of
     truth).
 
-    Dead players (``state.players[pid].alive is False``) short-circuit to
-    :data:`DEAD_SENTINEL` without evaluating any feature. The sentinel is
-    finite so downstream softmax / normalization arithmetic stays well-
-    behaved; its magnitude (``-1e6``) is far below any plausible live-player
-    score on a 40x40 board.
+    Dead players are scored with the same features as living ones — under
+    the corrected rules death (being walled out / finishing your region) is
+    inevitable and keeps all territory, so it must not be treated as a
+    catastrophe. A dead player's diminished prospects show up naturally:
+    their ``reachable_area`` collapses to their territory and their
+    ``choke_pressure`` saturates at 1.
 
     ``evaluate()`` pays for the Voronoi partition once and scores every
     player against the same cache. ``evaluate_for()`` rebuilds the cache
@@ -110,15 +107,10 @@ class LinearEvaluator:
         scores = np.zeros(n, dtype=np.float64)
         cache = _build_cache(state)
         for p in state.players:
-            if not p.alive:
-                scores[p.player_id] = DEAD_SENTINEL
-                continue
             scores[p.player_id] = self._score(state, p.player_id, cache)
         return scores
 
     def evaluate_for(self, state: GameState, player_id: int) -> float:
-        if not state.players[player_id].alive:
-            return DEAD_SENTINEL
         cache = _build_cache(state)
         return self._score(state, player_id, cache)
 
@@ -136,6 +128,12 @@ class LinearEvaluator:
     def _feat_reachable_area(
         self, state: GameState, player_id: int, cache: _FeatureCache
     ) -> float:
+        # Dead players keep their territory but can never claim more; the
+        # Voronoi partition only seeds living players, so substitute the
+        # territory they hold.
+        p = state.players[player_id]
+        if not p.alive:
+            return float(p.territory_count)
         return float(cache.reachable_counts[player_id])
 
     def _feat_mobility(
@@ -143,13 +141,10 @@ class LinearEvaluator:
     ) -> float:
         return float(mobility(state, player_id))
 
-    def _feat_enclosure_potential_area(
+    def _feat_claiming_mobility(
         self, state: GameState, player_id: int, cache: _FeatureCache
     ) -> float:
-        result = enclosure_potential(state, player_id)
-        if result is None:
-            return 0.0
-        return float(result[1])
+        return float(claiming_mobility(state, player_id))
 
     def _feat_choke_pressure(
         self, state: GameState, player_id: int, cache: _FeatureCache
@@ -160,42 +155,16 @@ class LinearEvaluator:
         p = state.players[player_id]
         if not p.alive:
             return 1.0
-        head = p.head
-        if head == (-1, -1):
+        if p.head == (-1, -1):
             return 1.0
 
-        grid = state.grid
-        h, w = grid.shape
-        hr, hc = head
-
-        visited = np.zeros((h, w), dtype=np.bool_)
-        q: deque[tuple[int, int]] = deque()
-        for dr, dc in DIRECTIONS:
-            nr, nc = hr + dr, hc + dc
-            if 0 <= nr < h and 0 <= nc < w and grid.item(nr, nc) == EMPTY:
-                visited[nr, nc] = True
-                q.append((nr, nc))
-
-        while q:
-            r, c = q.popleft()
-            for dr, dc in DIRECTIONS:
-                nr, nc = r + dr, c + dc
-                if (
-                    0 <= nr < h
-                    and 0 <= nc < w
-                    and not visited[nr, nc]
-                    and grid.item(nr, nc) == EMPTY
-                ):
-                    visited[nr, nc] = True
-                    q.append((nr, nc))
-
-        solo = int(visited.sum())
+        solo = _solo_reachable_empties(state, player_id)
         if solo == 0:
             return 1.0
 
-        # reachable_counts includes the head cell; solo counts empty cells
-        # only, so subtract one for the comparison.
-        contested = cache.reachable_counts[player_id] - 1
+        # reachable_counts includes the player's territory (seeded at
+        # distance 0); solo counts EMPTY cells only, so subtract it.
+        contested = cache.reachable_counts[player_id] - p.territory_count
         if contested < 0:
             contested = 0
         ratio = contested / solo
@@ -222,12 +191,12 @@ def default_evaluator() -> LinearEvaluator:
         {
             "territory_total": 1.0,
             "reachable_area": 0.3,
-            "mobility": 0.5,
-            "enclosure_potential_area": 0.2,
+            "claiming_mobility": 0.2,
+            "mobility": 0.1,
             "choke_pressure": -0.4,
             "opponent_distance": 0.05,
         }
     )
 
 
-__all__ = ["DEAD_SENTINEL", "LinearEvaluator", "default_evaluator"]
+__all__ = ["LinearEvaluator", "default_evaluator"]

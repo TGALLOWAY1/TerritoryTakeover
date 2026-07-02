@@ -133,19 +133,36 @@ def test_seed_determinism() -> None:
         np.testing.assert_array_equal(done_a, done_b)
 
 
+def _drive_to_terminal(
+    env: SyncVectorTerritoryEnv,
+    obs: dict[str, np.ndarray],
+    rng: np.random.Generator,
+    max_iters: int = 3000,
+) -> tuple[dict[str, np.ndarray], np.ndarray, list[dict[str, Any]]]:
+    """Step ``env`` with random legal actions until env 0 reports done.
+
+    Illegal moves are wasted turns under the new rules, so terminals only
+    arrive naturally (board fills / players get blocked out). Returns the
+    post-terminal ``(obs, rewards, infos)`` of the terminating step.
+    """
+    for _ in range(max_iters):
+        actions = _pick_legal_actions(obs["mask"], rng)
+        obs, rewards, dones, infos = env.step(actions)
+        if bool(dones[0]):
+            return obs, rewards, infos
+    raise AssertionError(f"env 0 did not terminate within {max_iters} steps")
+
+
 def test_auto_reset_on_terminal() -> None:
-    """Forcing a terminal via an illegal move in a 2p game must auto-reset."""
+    """Driving a small 2p game to natural termination must auto-reset."""
     env = SyncVectorTerritoryEnv(
-        num_envs=1, board_size=6, num_players=2, seed=4
+        num_envs=1, board_size=4, num_players=2, seed=4
     )
-    env.reset()
+    obs = env.reset()
+    rng = np.random.default_rng(4)
 
-    # Action index 4 is out-of-range — the engine marks the player alive=False
-    # and _advance_turn leaves only one live player → done=True in a 2p game.
-    illegal = np.array([4], dtype=np.int64)
-    obs, _rewards, dones, infos = env.step(illegal)
+    obs, _rewards, infos = _drive_to_terminal(env, obs, rng)
 
-    assert bool(dones[0]), "episode should terminate after illegal move in 2p game"
     info = infos[0]
     assert "terminal_observation" in info
     assert "episode_steps" in info
@@ -156,10 +173,9 @@ def test_auto_reset_on_terminal() -> None:
     assert obs["mask"][0].any(), "post-reset mask has no legal actions"
 
     # A second step() must not error out and must keep shapes intact.
-    rng = np.random.default_rng(0)
     actions = _pick_legal_actions(obs["mask"], rng)
     obs2, _, _, _ = env.step(actions)
-    assert obs2["grid"].shape == (1, 6, 6, 6)
+    assert obs2["grid"].shape == (1, 4, 4, 4)
 
 
 def test_truncation_via_max_steps() -> None:
@@ -200,47 +216,55 @@ def test_sparse_reward_added_on_terminal() -> None:
 
     env = SyncVectorTerritoryEnv(
         num_envs=1,
-        board_size=6,
+        board_size=4,
         num_players=2,
         reward_scheme="sparse",
         seed=6,
     )
-    env.reset()
+    obs = env.reset()
+    rng = np.random.default_rng(6)
 
-    # Grab a reference to the underlying state BEFORE step, then force terminal
-    # via illegal move; re-read the state's winner/terminal bonus and verify
-    # the reward includes it.
-    slot = env._slots[0]
-    pre_step_state = slot.state  # engine mutates in place
+    # Grab a reference to the underlying state on every step so the reference
+    # from the terminating step survives the auto-reset (engine mutates in
+    # place; _reset_slot rebinds slot.state, leaving our reference untouched).
+    pre_step_state = env._slots[0].state
+    rewards = np.zeros(1, dtype=np.float32)
+    infos: list[dict[str, Any]] = [{}]
+    for _ in range(3000):
+        pre_step_state = env._slots[0].state
+        actions = _pick_legal_actions(obs["mask"], rng)
+        obs, rewards, dones, infos = env.step(actions)
+        if bool(dones[0]):
+            break
+    else:
+        raise AssertionError("env 0 did not terminate within 3000 steps")
 
-    illegal = np.array([4], dtype=np.int64)
-    _obs, rewards, dones, infos = env.step(illegal)
-
-    assert bool(dones[0])
-    # The slot has already auto-reset, but pre_step_state still points at the
-    # now-terminal GameState (engine mutates in place; new_game in _reset_slot
-    # rebinds slot.state, leaving pre_step_state untouched).
     assert pre_step_state.done
     assert "winner" in infos[0]
+    assert infos[0]["winner"] == pre_step_state.winner
     expected_terminal = compute_terminal_reward(pre_step_state, scheme="sparse")[0]
-    # Illegal-move engine reward is 0; sparse scheme adds the terminal bonus.
-    assert float(rewards[0]) == float(expected_terminal), (
-        f"reward={float(rewards[0])} expected={float(expected_terminal)}"
+    # The agent's final move earns the engine reward (0.0 traversal/wasted or
+    # 1.0 claim) plus the sparse terminal bonus.
+    engine_component = float(rewards[0]) - float(expected_terminal)
+    assert engine_component in (0.0, 1.0), (
+        f"reward={float(rewards[0])} terminal={float(expected_terminal)}"
     )
 
 
 def test_step_scheme_no_terminal_bonus() -> None:
     """reward_scheme='step' must NOT add a terminal bonus (default behavior)."""
     env = SyncVectorTerritoryEnv(
-        num_envs=1, board_size=6, num_players=2, seed=7
+        num_envs=1, board_size=4, num_players=2, seed=7
     )
-    env.reset()
-    illegal = np.array([4], dtype=np.int64)
-    _obs, rewards, dones, _infos = env.step(illegal)
-    assert bool(dones[0])
-    assert float(rewards[0]) == 0.0, (
-        f"step scheme should give reward=0 on illegal move; got {float(rewards[0])}"
+    obs = env.reset()
+    rng = np.random.default_rng(7)
+    _obs, rewards, infos = _drive_to_terminal(env, obs, rng)
+    # Terminal-step reward is just the engine reward (0.0 or 1.0) — no ±1
+    # sparse bonus — and the step scheme never reports a winner.
+    assert float(rewards[0]) in (0.0, 1.0), (
+        f"step scheme should not add a terminal bonus; got {float(rewards[0])}"
     )
+    assert "winner" not in infos[0]
 
 
 def test_rejects_agent_seat_in_opponent_policies() -> None:

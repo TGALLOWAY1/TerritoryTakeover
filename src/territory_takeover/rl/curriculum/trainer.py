@@ -15,11 +15,11 @@ per stage-eval would dominate wall-clock). The rolling plateau check in
 the YAML. Full BT-MLE Elo is computed once at the end of a run via
 ``scripts/compute_elo.py``.
 
-**First-enclosure instrumentation.** Self-play detects first enclosure
-in-trainer (not in ``selfplay.play_game``) by observing the delta in the
-``claimed_count`` accumulator across every game. The first game in which
-any player's ``claimed_count > 0`` is recorded as the stage's
-first-enclosure step count.
+**First-blockout instrumentation.** Self-play records the first game in
+which any player was walled out mid-game (died while EMPTY cells
+remained) as the stage's first-blockout step count — the corrected-rules
+analogue of the old first-enclosure milestone: it marks the moment
+self-play discovers territory denial.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ class StageResult:
     self_play_steps: int
     num_iterations: int
     final_win_rate_vs_random: float
-    first_enclosure_step: int | None
+    first_blockout_step: int | None
     promoted: bool
 
 
@@ -117,7 +117,7 @@ def _evaluate_vs_random(
             action = agent.select_action(state, player)
             step(state, action, strict=False)
 
-        final = np.asarray([p.claimed_count for p in state.players], dtype=np.int64)
+        final = np.asarray([p.territory_count for p in state.players], dtype=np.int64)
         az_claim = int(final[0])
         best = int(final.max())
         if az_claim == best:
@@ -197,7 +197,7 @@ def train_curriculum(
     - ``out_dir/stage_{name}/`` per stage with ``net_final.pt``, ``log.csv``.
     - ``out_dir/net_final.pt`` — final stage's checkpoint.
     - ``out_dir/curriculum_progress.yaml`` updated on every promotion.
-    - ``out_dir/first_enclosure.csv`` — per-stage first-enclosure step.
+    - ``out_dir/first_blockout.csv`` — per-stage first-blockout step.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -210,10 +210,10 @@ def train_curriculum(
     cumulative_steps = 0
     results: list[StageResult] = []
 
-    first_enc_log = out_dir / "first_enclosure.csv"
+    first_enc_log = out_dir / "first_blockout.csv"
     with first_enc_log.open("w", newline="") as feh:
         fe_writer = csv.writer(feh)
-        fe_writer.writerow(["stage_name", "cumulative_step", "first_enclosure_step"])
+        fe_writer.writerow(["stage_name", "cumulative_step", "first_blockout_step"])
 
         for stage_idx, stage in enumerate(schedule.stages):
             stage_dir = out_dir / f"stage_{stage_idx:02d}_{stage.name}"
@@ -241,7 +241,7 @@ def train_curriculum(
             promotion = PromotionState(criterion=stage.promotion)
 
             stage_log_path = stage_dir / "log.csv"
-            first_enclosure_step: int | None = None
+            first_blockout_step: int | None = None
 
             with stage_log_path.open("w", newline="") as slf:
                 stage_writer = csv.writer(slf)
@@ -272,12 +272,12 @@ def train_curriculum(
                             promotion.record_steps(len(samples))
                             cumulative_steps += len(samples)
 
-                            if first_enclosure_step is None and first_enc_in_game is not None:
+                            if first_blockout_step is None and first_enc_in_game is not None:
                                 # Record the cumulative stage-step at which
                                 # the first enclosure observed in ANY game
                                 # of this stage happened. Approximate: we
                                 # don't subtract the mid-game offset.
-                                first_enclosure_step = promotion.stage_steps
+                                first_blockout_step = promotion.stage_steps
 
                         losses_acc = {
                             "policy_loss": 0.0,
@@ -355,7 +355,7 @@ def train_curriculum(
                 final_win_rate_vs_random=(promotion.elo_window[-1] / 100.0)
                 if promotion.elo_window
                 else 0.0,
-                first_enclosure_step=first_enclosure_step,
+                first_blockout_step=first_blockout_step,
                 promoted=True,
             )
             results.append(result)
@@ -363,7 +363,7 @@ def train_curriculum(
                 [
                     stage.name,
                     cumulative_steps,
-                    first_enclosure_step if first_enclosure_step is not None else -1,
+                    first_blockout_step if first_blockout_step is not None else -1,
                 ]
             )
             feh.flush()

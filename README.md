@@ -16,6 +16,30 @@ core at the bottom, a layered algorithm stack on top, and a benchmark
 suite that emits committed markdown reports every agent can be
 compared against.
 
+## Game rules (corrected July 2026)
+
+> **Rules correction.** The original engine implemented a snake-path +
+> enclosure-flood-fill game that did not match the intended design. The
+> engine now implements the corrected rules below; every committed
+> benchmark report, phase writeup, GIF, and the shipped
+> `net_reference.pt` checkpoint that predate the correction describe the
+> old game. The first corrected-rules evaluation lives at
+> `docs/experiments/corrected_rules_eval.md`.
+
+- 2 or 4 players spawn at the exact board corners; the spawn cell is
+  their first territory cell.
+- On your turn you move your head one cell (N/S/W/E) onto a cell that is
+  either **empty** (you claim it — one point per cell) or **already
+  yours** (free traversal, reversing included). Cells visited by other
+  players are permanent walls; territory never changes hands.
+- There is no automatic enclosure capture: walling off a region only
+  reserves it (nobody else can enter); you still spend turns walking
+  every cell to score it.
+- A player dies exactly when no empty cell is reachable from their head
+  through their own territory — walled out, or the board is full. Death
+  keeps all territory.
+- The game ends when every player is dead; most territory wins.
+
 ## Why this exists
 
 Comparing decision-systems algorithms honestly is surprisingly hard:
@@ -36,8 +60,9 @@ incidental — the point is the method.
         └──────────┬───────────┘
                    ▼
         ┌──────────────────────┐        ┌────────────────────────────┐
-        │     engine.step      ├───────▶│ detect_and_apply_enclosure │
-        └──────────┬───────────┘        └────────────────────────────┘
+        │     engine.step      ├───────▶│  has_reachable_empty       │
+        └──────────┬───────────┘        │  (liveness / blockout rule)│
+                   ▼                    └────────────────────────────┘
                    ▼
         ┌──────────────────────┐
         │   search.harness     │   seed-locked, Wilson-CI tournaments
@@ -71,7 +96,7 @@ that drives the real enclosure engine:
   (`Random` / `Greedy` / `MCTS Easy/Medium/Hard`); swapping resets the match.
 - **Play / pause / step / speed** controls (0.5×–20×) drive the simulation;
   *step* advances exactly one move and the turn counter + elapsed timer update live.
-- A live **stats panel** shows each seat's territory % (visited + enclosed cells),
+- A live **stats panel** shows each seat's territory % (visited cells),
   owned-cell count, legal-move count, and alive/dead status.
 - The header **menu** button reveals a debug panel (turn, alive seats, last move,
   and legal moves per seat); the **gear** opens settings (board size, and an
@@ -91,7 +116,7 @@ UCT and RAVE produce longer, more deliberate paths and split the board
 into opposing regions with stable claimed zones. Regenerate with
 `python scripts/record_agent_gallery.py --seed 0`.*
 
-## Headline result
+## Headline result *(old rules — predates the July 2026 correction)*
 
 5-way round-robin head-to-head at 20×20 / 2 players, 20 games per pair
 (200 games total). Overall win rate, Wilson 95% CI, ties counted
@@ -127,7 +152,7 @@ in one picture — it beats Greedy and Random but not the
 compute-matched MCTS agents. Regenerate with
 `python scripts/render_h2h_heatmap.py`.*
 
-## How a game plays out
+## How a game plays out *(old rules — predates the July 2026 correction)*
 
 ![Territory-growth plot: RAVE@200 vs Greedy, 20×20, seed 0](docs/assets/territory_growth.png)
 
@@ -140,7 +165,7 @@ discrete enclosure events that drive score. Greedy fires early
 cells) is what decides the game. Regenerate with
 `python scripts/record_territory_growth.py --seed 0`.*
 
-## Does more MCTS compute help?
+## Does more MCTS compute help? *(old rules — predates the July 2026 correction)*
 
 ![MCTS scaling: UCT vs random on 10×10, win rate vs simulations/move with Wilson 95% CI](docs/assets/mcts_scaling.png)
 
@@ -165,13 +190,13 @@ against the benchmarks in [`benchmarks/`](benchmarks/):
 |-----------------------------------------------|-----------|
 | `GameState.copy()` (for MCTS tree expansion)  | < 50 µs   |
 | `legal_actions()` (per move on the hot path)  | < 1 µs    |
-| `detect_and_apply_enclosure` on 40×40         | < 200 µs  |
+| liveness check (`has_reachable_empty`)        | O(1) amortized |
 
 These numbers drive the implementation choices: a single int8 grid as
-the source of truth, `memcpy`-friendly state copies, a boundary BFS
-with a reusable scratch buffer and a monotonic stamp instead of
-per-call allocation, and `grid.item(r, c)` in the hot path to dodge
-the `grid[r, c]` boxing overhead. See
+the source of truth, `memcpy`-friendly state copies, a witness-cached
+liveness BFS with a reusable scratch buffer and a monotonic stamp
+instead of per-call allocation, and `grid.item(r, c)` in the hot path
+to dodge the `grid[r, c]` boxing overhead. See
 [`docs/OPTIMIZATION_ANALYSIS.md`](docs/OPTIMIZATION_ANALYSIS.md) for
 the full cost-breakdown.
 

@@ -220,13 +220,15 @@ def play_game_instrumented(
     seed: int | None = None,
     spawn_positions: list[tuple[int, int]] | None = None,
 ) -> tuple[list[Sample], int | None]:
-    """Self-play driver with Phase 3d first-enclosure instrumentation.
+    """Self-play driver with Phase 3d first-blockout instrumentation.
 
-    Returns ``(samples, first_enclosure_half_move)`` where the second
-    element is the half-move index at which any player's
-    ``claimed_count`` first became non-zero, or ``None`` if no enclosure
-    occurred in this game. The check is a single integer read per
-    half-move; the hot path is unaffected.
+    Returns ``(samples, first_blockout_half_move)`` where the second
+    element is the half-move index at which any player was first walled
+    out (died while EMPTY cells remained on the board), or ``None`` if no
+    mid-game blockout occurred. This is the corrected-rules analogue of
+    the old first-enclosure milestone: it marks the moment self-play
+    discovers territory denial. The check is a cheap scan per half-move;
+    the hot path is unaffected.
     """
     state = new_game(
         board_size=cfg.board_size,
@@ -247,7 +249,7 @@ def play_game_instrumented(
 
     board_area = float(cfg.board_size * cfg.board_size)
 
-    first_enclosure_half_move: int | None = None
+    first_blockout_half_move: int | None = None
     half_move = 0
     while not state.done:
         if cfg.max_half_moves is not None and half_move >= cfg.max_half_moves:
@@ -279,10 +281,12 @@ def play_game_instrumented(
         )
 
         half_move += 1
-        if first_enclosure_half_move is None and any(
-            p.claimed_count > 0 for p in state.players
+        if (
+            first_blockout_half_move is None
+            and state.empty_count > 0
+            and any(not p.alive for p in state.players)
         ):
-            first_enclosure_half_move = half_move
+            first_blockout_half_move = half_move
 
     terminal_scores = _normalized_final_scores(state)
 
@@ -338,7 +342,7 @@ def play_game_instrumented(
                 step_index=t,
             )
         )
-    return samples, first_enclosure_half_move
+    return samples, first_blockout_half_move
 
 
 __all__ = [

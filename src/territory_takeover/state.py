@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .constants import (
-    CLAIMED_CODES,
     DEFAULT_BOARD_HEIGHT,
     DEFAULT_BOARD_WIDTH,
     DEFAULT_NUM_PLAYERS,
     EMPTY,
-    PATH_CODES,
+    OWNED_CODES,
 )
 
 if TYPE_CHECKING:
@@ -22,25 +21,34 @@ if TYPE_CHECKING:
 
 _REPR_CHARS: dict[int, str] = {
     EMPTY: ".",
-    PATH_CODES[0]: "1",
-    PATH_CODES[1]: "2",
-    PATH_CODES[2]: "3",
-    PATH_CODES[3]: "4",
-    CLAIMED_CODES[0]: "A",
-    CLAIMED_CODES[1]: "B",
-    CLAIMED_CODES[2]: "C",
-    CLAIMED_CODES[3]: "D",
+    OWNED_CODES[0]: "1",
+    OWNED_CODES[1]: "2",
+    OWNED_CODES[2]: "3",
+    OWNED_CODES[3]: "4",
 }
 
 
 @dataclass(slots=True)
 class PlayerState:
+    """Per-player view of the game.
+
+    The grid is the source of truth for cell ownership; `territory_count`
+    is a cache that every mutation must keep in lockstep with the grid's
+    count of that player's OWNED cells. `head` is the player's current
+    position (always one of their owned cells).
+    """
+
     player_id: int
-    path: list[tuple[int, int]]
-    path_set: set[tuple[int, int]]
     head: tuple[int, int]
-    claimed_count: int
+    territory_count: int
     alive: bool
+    # Liveness-witness cache for `engine.has_reachable_empty`: an EMPTY cell
+    # adjacent to this player's territory found by the last successful check.
+    # Because territory only grows (and stays connected) and EMPTY cells are
+    # only ever claimed, the witness proves liveness until the moment that
+    # exact cell stops being EMPTY — making the per-turn liveness check O(1)
+    # amortized. None = no witness (never checked, or last check failed).
+    alive_witness: tuple[int, int] | None = None
 
 
 @dataclass(slots=True)
@@ -56,23 +64,21 @@ class GameState:
     # -1 is a "not yet seeded" sentinel; the engine seeds it at game creation
     # and `copy()` propagates the current value.
     alive_count: int = -1
-    # Scratch reachability mask reused by `detect_and_apply_enclosure` to
-    # avoid allocating a fresh `(H, W)` buffer per BFS. Not cloned on `copy()`
-    # — each `GameState` gets its own scratch; contents are meaningless between
-    # calls (the engine uses a monotonically increasing stamp to avoid having
-    # to zero between calls).
+    # Scratch reachability mask reused by the liveness BFS
+    # (`engine.has_reachable_empty`) to avoid allocating a fresh `(H, W)`
+    # buffer per call. Not cloned on `copy()` — each `GameState` gets its own
+    # scratch; contents are meaningless between calls (the engine uses a
+    # monotonically increasing stamp to avoid zeroing between calls).
     _scratch_reachable: NDArray[np.int32] | None = None
-    # Monotonically increasing stamp consumed by the enclosure BFS. Paired with
-    # `_scratch_reachable` so two values per call suffice to distinguish
-    # "visited this call" from "confirmed pocket".
-    _enclosure_stamp: int = 0
-    # Cached count of EMPTY cells on the grid. Maintained incrementally by the
-    # engine (decrements on each path placement and each enclosure claim) so
-    # `detect_and_apply_enclosure` can early-exit when the boundary BFS reaches
-    # every EMPTY cell (`reachable_count == empty_count`) — skipping the
-    # O(H*W) mask/assignment entirely on the common "trigger fires, nothing
-    # enclosed" path. -1 is a "not yet seeded" sentinel; callers that skip
-    # `new_game`/`reset` get a lazy rebuild the first time the engine needs it.
+    # Monotonically increasing stamp consumed by the liveness BFS. Paired
+    # with `_scratch_reachable` so one value per call suffices to mark
+    # "visited this call".
+    _reach_stamp: int = 0
+    # Cached count of EMPTY cells on the grid. Maintained incrementally by
+    # the engine (decrements on each claim) so full-board termination is a
+    # constant-time check. -1 is a "not yet seeded" sentinel; callers that
+    # skip `new_game`/`reset` get a lazy rebuild the first time the engine
+    # needs it.
     empty_count: int = -1
 
     @classmethod
@@ -92,10 +98,8 @@ class GameState:
         players = [
             PlayerState(
                 player_id=i,
-                path=[],
-                path_set=set(),
                 head=(-1, -1),
-                claimed_count=0,
+                territory_count=0,
                 alive=True,
             )
             for i in range(num_players)
@@ -111,20 +115,18 @@ class GameState:
         """Independent copy suitable for tree search.
 
         - `grid` via `np.ndarray.copy` (C memcpy).
-        - Per-player `path` (list) and `path_set` (set) shallow-copied;
-          their contents (tuples of ints) are immutable, so sharing is safe.
-        - Scalars (int/bool/None) and the immutable `head` tuple are copied by value.
+        - Scalars (int/bool/None) and the immutable `head` tuple are copied
+          by value.
         - `_scratch_reachable` is NOT copied — cloned states get a fresh
           lazily-allocated scratch buffer (it carries no game information).
         """
         new_players = [
             PlayerState(
                 player_id=p.player_id,
-                path=p.path.copy(),
-                path_set=p.path_set.copy(),
                 head=p.head,
-                claimed_count=p.claimed_count,
+                territory_count=p.territory_count,
                 alive=p.alive,
+                alive_witness=p.alive_witness,
             )
             for p in self.players
         ]
@@ -137,7 +139,7 @@ class GameState:
             done=self.done,
             alive_count=self.alive_count,
             _scratch_reachable=None,
-            _enclosure_stamp=0,
+            _reach_stamp=0,
             empty_count=self.empty_count,
         )
 

@@ -301,7 +301,7 @@ def _run_one_game(
 
         step(state, action, strict=True)
 
-    final_scores = [len(p.path) + p.claimed_count for p in state.players]
+    final_scores = [p.territory_count for p in state.players]
 
     return GameLog(
         game_index=game_index,

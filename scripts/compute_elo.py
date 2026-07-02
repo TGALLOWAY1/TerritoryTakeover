@@ -130,7 +130,7 @@ def _play_one_game(
         player = state.current_player
         action = agents[player].select_action(state, player)
         step(state, action, strict=False)
-    return [p.claimed_count for p in state.players]
+    return [p.territory_count for p in state.players]
 
 
 def run_round_robin(

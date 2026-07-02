@@ -5,11 +5,9 @@ Actions are encoded as direction indices ``0..3`` matching
 action space at 4 keeps the MCTS prior / policy head shape constant
 regardless of board size.
 
-A target cell is legal iff it is in bounds and ``EMPTY``. Note on traversal:
-the rules mention free traversal along one's own path before placement, but
-since traversal doesn't change the head and placement must extend from the
-head, traversal is a no-op for legal move generation. Revisit only if a rule
-variant permits branching from arbitrary path tiles.
+A target cell is legal iff it is in bounds and not owned by another player:
+EMPTY cells (a claim) and the mover's own cells (free traversal through
+already-claimed territory, including reversing direction) are both legal.
 """
 
 from __future__ import annotations
@@ -18,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .constants import DIRECTIONS, EMPTY
+from .constants import DIRECTIONS, EMPTY, OWNED_CODES
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -31,20 +29,43 @@ def legal_action_mask(state: GameState, player_id: int) -> NDArray[np.bool_]:
     r, c = state.players[player_id].head
     h, w = state.grid.shape
     g = state.grid
+    ok = (EMPTY, OWNED_CODES[player_id])
     mask = np.zeros(4, dtype=np.bool_)
-    if r > 0 and g.item(r - 1, c) == EMPTY:
+    if r > 0 and g.item(r - 1, c) in ok:
         mask[0] = True
-    if r < h - 1 and g.item(r + 1, c) == EMPTY:
+    if r < h - 1 and g.item(r + 1, c) in ok:
         mask[1] = True
-    if c > 0 and g.item(r, c - 1) == EMPTY:
+    if c > 0 and g.item(r, c - 1) in ok:
         mask[2] = True
-    if c < w - 1 and g.item(r, c + 1) == EMPTY:
+    if c < w - 1 and g.item(r, c + 1) in ok:
         mask[3] = True
     return mask
 
 
 def legal_actions(state: GameState, player_id: int) -> list[int]:
     """Return the list of legal direction indices (0..3) from the head."""
+    r, c = state.players[player_id].head
+    h, w = state.grid.shape
+    g = state.grid
+    ok = (EMPTY, OWNED_CODES[player_id])
+    out: list[int] = []
+    if r > 0 and g.item(r - 1, c) in ok:
+        out.append(0)
+    if r < h - 1 and g.item(r + 1, c) in ok:
+        out.append(1)
+    if c > 0 and g.item(r, c - 1) in ok:
+        out.append(2)
+    if c < w - 1 and g.item(r, c + 1) in ok:
+        out.append(3)
+    return out
+
+
+def claiming_actions(state: GameState, player_id: int) -> list[int]:
+    """Return the direction indices whose target is an EMPTY cell.
+
+    Subset of :func:`legal_actions`: these are the moves that claim new
+    territory this turn (as opposed to traversal moves over own cells).
+    """
     r, c = state.players[player_id].head
     h, w = state.grid.shape
     g = state.grid
@@ -64,20 +85,22 @@ def has_any_legal_action(state: GameState, player_id: int) -> bool:
     """Return True iff the player has at least one legal action.
 
     Short-circuits on the first legal direction — avoids the list allocation
-    from :func:`legal_actions` when only the yes/no answer is needed. Used by
-    the engine's turn-advance loop where the candidate-player check fires
-    multiple times per `step` in the late game.
+    from :func:`legal_actions` when only the yes/no answer is needed. Note
+    that under the corrected rules this is NOT the liveness test — a player
+    can have legal traversal moves yet be dead because no EMPTY cell is
+    reachable; see :func:`territory_takeover.engine.has_reachable_empty`.
     """
     r, c = state.players[player_id].head
     h, w = state.grid.shape
     g = state.grid
-    if r > 0 and g.item(r - 1, c) == EMPTY:
+    ok = (EMPTY, OWNED_CODES[player_id])
+    if r > 0 and g.item(r - 1, c) in ok:
         return True
-    if r < h - 1 and g.item(r + 1, c) == EMPTY:
+    if r < h - 1 and g.item(r + 1, c) in ok:
         return True
-    if c > 0 and g.item(r, c - 1) == EMPTY:
+    if c > 0 and g.item(r, c - 1) in ok:
         return True
-    return bool(c < w - 1 and g.item(r, c + 1) == EMPTY)
+    return bool(c < w - 1 and g.item(r, c + 1) in ok)
 
 
 def action_to_coord(

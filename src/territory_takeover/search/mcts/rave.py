@@ -68,7 +68,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
-from territory_takeover.actions import action_to_coord, legal_actions
+from territory_takeover.actions import action_to_coord, claiming_actions, legal_actions
 from territory_takeover.constants import DIRECTIONS
 from territory_takeover.engine import step
 
@@ -83,6 +83,7 @@ from .uct import (
     populate_untried,
     reconstruct_actions,
     snapshot_state,
+    states_equivalent,
 )
 
 if TYPE_CHECKING:
@@ -123,7 +124,7 @@ class RaveNode(MCTSNode):
 
 
 def _cell_of_action(state: GameState, player_id: int, action: int) -> int:
-    """Flat cell index that ``action`` will place ``player_id``'s path onto."""
+    """Flat cell index that ``action`` moves ``player_id``'s head onto."""
     r, c = action_to_coord(state, player_id, action)
     w = int(state.grid.shape[1])
     return int(r) * w + int(c)
@@ -213,27 +214,36 @@ def _expand_rave(
 def _rollout_with_history(
     state: GameState, rng: np.random.Generator
 ) -> tuple[NDArray[np.float64], list[tuple[int, int]]]:
-    """Uniform-random rollout that records ``(player_id, cell_idx)`` per move.
+    """Claim-biased random rollout that records ``(player_id, cell_idx)`` per claim.
 
-    Mutates ``state`` in place; caller passes ``state.copy()``. Cells are
+    Mutates ``state`` in place; caller passes ``state.copy()``. Policy
+    mirrors :func:`territory_takeover.rollout.simulate_random_rollout`:
+    uniform among claiming moves when any exist, else uniform among
+    traversal moves. Only claiming moves enter the AMAF history — a
+    traversal move claims nothing, so "this cell was claimed by seat X
+    somewhere below this node" is the signal AMAF wants. Cells are
     recorded *before* :func:`step` advances the current player, so the
-    ``pid`` in each tuple is the seat that actually placed the tile.
+    ``pid`` in each tuple is the seat that actually claimed the cell.
     """
     history: list[tuple[int, int]] = []
     w = int(state.grid.shape[1])
     while not state.done:
         pid = state.current_player
-        legal = legal_actions(state, pid)
-        if not legal:
-            # Defensive: engine invariant says current_player has legal
-            # moves at non-terminal states. If somehow not, let strict=False
-            # mark the player dead and advance.
-            step(state, 0, strict=False)
-            continue
-        action = legal[int(rng.integers(len(legal)))]
-        dr, dc = DIRECTIONS[action]
-        r, c = state.players[pid].head
-        history.append((pid, (r + dr) * w + (c + dc)))
+        claims = claiming_actions(state, pid)
+        if claims:
+            action = claims[int(rng.integers(len(claims)))]
+            dr, dc = DIRECTIONS[action]
+            r, c = state.players[pid].head
+            history.append((pid, (r + dr) * w + (c + dc)))
+        else:
+            legal = legal_actions(state, pid)
+            if not legal:
+                # Defensive: engine invariant says current_player has legal
+                # moves at non-terminal states. If somehow not, let
+                # strict=False mark the turn as wasted and advance.
+                step(state, 0, strict=False)
+                continue
+            action = legal[int(rng.integers(len(legal)))]
         step(state, action, strict=False)
     return _terminal_value(state), history
 
@@ -521,6 +531,8 @@ class RaveAgent:
         if node.player_to_move != player_id:
             return None
         if not isinstance(node, RaveNode):
+            return None
+        if not states_equivalent(node.state, state):
             return None
         node.parent = None
         if not node.terminal and not node.children and not node.untried_actions:

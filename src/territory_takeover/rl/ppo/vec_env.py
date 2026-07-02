@@ -160,7 +160,7 @@ class SyncVectorTerritoryEnv:
         self.max_steps = max_steps
 
         self.single_observation_shapes: dict[str, tuple[int, ...]] = {
-            "grid": (2 * num_players + 2, board_size, board_size),
+            "grid": (num_players + 2, board_size, board_size),
             "scalars": (3 + num_players,),
             "mask": (4,),
         }

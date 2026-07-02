@@ -10,37 +10,29 @@ from territory_takeover.constants import (
     DEFAULT_BOARD_HEIGHT,
     DEFAULT_BOARD_WIDTH,
     EMPTY,
-    PLAYER_1_CLAIMED,
-    PLAYER_1_PATH,
-    PLAYER_2_CLAIMED,
-    PLAYER_2_PATH,
-    PLAYER_3_CLAIMED,
-    PLAYER_3_PATH,
-    PLAYER_4_CLAIMED,
-    PLAYER_4_PATH,
+    PLAYER_1_OWNED,
+    PLAYER_2_OWNED,
+    PLAYER_3_OWNED,
+    PLAYER_4_OWNED,
 )
 from territory_takeover.state import GameState, PlayerState
 
 
 def _make_small_state() -> GameState:
     grid = np.zeros((6, 6), dtype=np.int8)
-    grid[0, 0] = PLAYER_1_PATH
-    grid[0, 1] = PLAYER_1_PATH
-    grid[5, 5] = PLAYER_2_PATH
+    grid[0, 0] = PLAYER_1_OWNED
+    grid[0, 1] = PLAYER_1_OWNED
+    grid[5, 5] = PLAYER_2_OWNED
     p0 = PlayerState(
         player_id=0,
-        path=[(0, 0), (0, 1)],
-        path_set={(0, 0), (0, 1)},
         head=(0, 1),
-        claimed_count=0,
+        territory_count=2,
         alive=True,
     )
     p1 = PlayerState(
         player_id=1,
-        path=[(5, 5)],
-        path_set={(5, 5)},
         head=(5, 5),
-        claimed_count=0,
+        territory_count=1,
         alive=True,
     )
     return GameState(
@@ -55,11 +47,10 @@ def _make_small_state() -> GameState:
 
 def test_game_state_copy_independence() -> None:
     original = _make_small_state()
+    original.players[0].alive_witness = (0, 2)
     snapshot_grid = original.grid.copy()
-    snapshot_p0_path = list(original.players[0].path)
-    snapshot_p0_path_set = set(original.players[0].path_set)
     snapshot_p0_head = original.players[0].head
-    snapshot_p0_claimed = original.players[0].claimed_count
+    snapshot_p0_territory = original.players[0].territory_count
     snapshot_p0_alive = original.players[0].alive
     snapshot_current = original.current_player
     snapshot_turn = original.turn_number
@@ -68,14 +59,16 @@ def test_game_state_copy_independence() -> None:
 
     clone = original.copy()
 
+    # Witness cache is propagated (it is valid across copies).
+    assert clone.players[0].alive_witness == (0, 2)
+
     # Grid mutation.
-    clone.grid[2, 2] = PLAYER_3_PATH
+    clone.grid[2, 2] = PLAYER_3_OWNED
     # Player 0 mutations.
-    clone.players[0].path.append((0, 2))
-    clone.players[0].path_set.add((0, 2))
     clone.players[0].head = (0, 2)
-    clone.players[0].claimed_count += 5
+    clone.players[0].territory_count += 5
     clone.players[0].alive = False
+    clone.players[0].alive_witness = None
     # GameState scalars.
     clone.current_player = 1
     clone.turn_number = 42
@@ -84,19 +77,17 @@ def test_game_state_copy_independence() -> None:
 
     # Original unchanged in every dimension.
     assert np.array_equal(original.grid, snapshot_grid)
-    assert original.players[0].path == snapshot_p0_path
-    assert original.players[0].path_set == snapshot_p0_path_set
     assert original.players[0].head == snapshot_p0_head
-    assert original.players[0].claimed_count == snapshot_p0_claimed
+    assert original.players[0].territory_count == snapshot_p0_territory
     assert original.players[0].alive == snapshot_p0_alive
+    assert original.players[0].alive_witness == (0, 2)
     assert original.current_player == snapshot_current
     assert original.turn_number == snapshot_turn
     assert original.winner == snapshot_winner
     assert original.done == snapshot_done
 
     # Clone reflects mutations.
-    assert clone.grid[2, 2] == PLAYER_3_PATH
-    assert (0, 2) in clone.players[0].path_set
+    assert clone.grid[2, 2] == PLAYER_3_OWNED
     assert clone.players[0].head == (0, 2)
     assert clone.done is True
 
@@ -109,42 +100,54 @@ def test_copy_does_not_share_mutable_containers() -> None:
     assert clone.players is not original.players
     for orig_p, clone_p in zip(original.players, clone.players, strict=True):
         assert orig_p is not clone_p
-        assert orig_p.path is not clone_p.path
-        assert orig_p.path_set is not clone_p.path_set
+
+
+def test_copy_does_not_share_scratch_buffer() -> None:
+    original = _make_small_state()
+    original._scratch_reachable = np.zeros((6, 6), dtype=np.int32)
+    original._reach_stamp = 17
+    clone = original.copy()
+    assert clone._scratch_reachable is None
+    assert clone._reach_stamp == 0
 
 
 def test_repr_contains_legend_chars() -> None:
     grid = np.zeros((2, 8), dtype=np.int8)
     grid[0, 0] = EMPTY
-    grid[0, 1] = PLAYER_1_PATH
-    grid[0, 2] = PLAYER_2_PATH
-    grid[0, 3] = PLAYER_3_PATH
-    grid[0, 4] = PLAYER_4_PATH
-    grid[1, 0] = PLAYER_1_CLAIMED
-    grid[1, 1] = PLAYER_2_CLAIMED
-    grid[1, 2] = PLAYER_3_CLAIMED
-    grid[1, 3] = PLAYER_4_CLAIMED
+    grid[0, 1] = PLAYER_1_OWNED
+    grid[0, 2] = PLAYER_2_OWNED
+    grid[0, 3] = PLAYER_3_OWNED
+    grid[0, 4] = PLAYER_4_OWNED
     state = GameState(grid=grid, players=[])
     text = repr(state)
 
-    for ch in (".", "1", "2", "3", "4", "A", "B", "C", "D"):
+    for ch in (".", "1", "2", "3", "4"):
         assert ch in text
     assert "turn=0" in text
     assert "current_player=0" in text
 
 
+def test_empty_factory_seeds_counts() -> None:
+    state = GameState.empty(height=5, width=7, num_players=3)
+    assert state.grid.shape == (5, 7)
+    assert state.empty_count == 35
+    assert state.alive_count == 3
+    for i, p in enumerate(state.players):
+        assert p.player_id == i
+        assert p.head == (-1, -1)
+        assert p.territory_count == 0
+        assert p.alive
+
+
 def test_copy_performance_40x40(capsys: object) -> None:
-    # Build a default-size state with realistic per-player path sizes.
     state = GameState.empty(
         height=DEFAULT_BOARD_HEIGHT,
         width=DEFAULT_BOARD_WIDTH,
         num_players=4,
     )
     for p in state.players:
-        cells = [(p.player_id, c) for c in range(20)]
-        p.path = list(cells)
-        p.path_set = set(cells)
-        p.head = cells[-1]
+        p.head = (p.player_id, 0)
+        p.territory_count = 20
 
     iterations = 1000
     # Warmup.

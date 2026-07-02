@@ -14,17 +14,17 @@ Differs from Phase 3b's encoder in two ways:
    explicit "whose turn is it" signal. We append ``N`` planes, exactly one
    of which is all-ones (for the active player), the rest zero.
 
-Layout of ``grid_planes`` is therefore ``(3N + 2, H, W)``:
+Layout of ``grid_planes`` is therefore ``(2N + 2, H, W)``:
 
-- Channels ``0 .. N - 1``: per-seat PATH cells.
-- Channels ``N .. 2N - 1``: per-seat CLAIMED cells.
-- Channel ``2N``: EMPTY mask.
-- Channel ``2N + 1``: one-hot head of the active player.
-- Channels ``2N + 2 .. 3N + 1``: per-seat turn one-hot (all-ones on the
+- Channels ``0 .. N - 1``: per-seat OWNED cells (visited territory).
+- Channel ``N``: EMPTY mask.
+- Channel ``N + 1``: one-hot head of the active player.
+- Channels ``N + 2 .. 2N + 1``: per-seat turn one-hot (all-ones on the
   active player's plane, zero elsewhere).
 
-Scalars match Phase 3b in shape ``(3 + N,)`` but without rotation: claimed
-counts are in native seat order.
+Scalars are shape ``(3 + N,)`` in native seat order: normalized turn count,
+per-seat territory fractions, board fill ratio, and the active player's
+territory fraction (duplicated for cheap access by the value head).
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from territory_takeover.constants import CLAIMED_CODES, EMPTY, PATH_CODES
+from territory_takeover.constants import EMPTY, OWNED_CODES
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 def grid_channel_count(num_players: int) -> int:
     """Return the number of grid input channels for ``num_players``."""
-    return 3 * num_players + 2
+    return 2 * num_players + 2
 
 
 def scalar_feature_dim(num_players: int) -> int:
@@ -67,30 +67,27 @@ def encode_az_observation(
     planes = np.zeros((grid_channel_count(num_players), h, w), dtype=np.float32)
 
     for pid in range(num_players):
-        planes[pid] = (grid == PATH_CODES[pid]).astype(np.float32)
-        planes[num_players + pid] = (grid == CLAIMED_CODES[pid]).astype(np.float32)
+        planes[pid] = (grid == OWNED_CODES[pid]).astype(np.float32)
 
-    planes[2 * num_players] = (grid == EMPTY).astype(np.float32)
+    planes[num_players] = (grid == EMPTY).astype(np.float32)
 
     head = state.players[active_player].head
     if state.players[active_player].alive and head != (-1, -1):
-        planes[2 * num_players + 1, head[0], head[1]] = 1.0
+        planes[num_players + 1, head[0], head[1]] = 1.0
 
-    planes[2 * num_players + 2 + active_player] = 1.0
+    planes[num_players + 2 + active_player] = 1.0
 
     total_cells = float(h * w)
     empty_count = float(np.count_nonzero(grid == EMPTY))
-    active_occupancy = float(
-        np.count_nonzero(grid == PATH_CODES[active_player])
-        + np.count_nonzero(grid == CLAIMED_CODES[active_player])
-    )
 
     scalars = np.zeros(scalar_feature_dim(num_players), dtype=np.float32)
     scalars[0] = min(state.turn_number / total_cells, 1.0)
     for pid in range(num_players):
-        scalars[1 + pid] = state.players[pid].claimed_count / total_cells
+        scalars[1 + pid] = state.players[pid].territory_count / total_cells
     scalars[1 + num_players] = 1.0 - empty_count / total_cells
-    scalars[2 + num_players] = active_occupancy / total_cells
+    scalars[2 + num_players] = (
+        state.players[active_player].territory_count / total_cells
+    )
 
     return planes, scalars
 

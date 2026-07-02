@@ -533,8 +533,7 @@ _LIVE_TEMPLATE: Final[str] = """<!DOCTYPE html>
           '<div><div class="k">Seat</div>' + (s + 1) + '</div>' +
           '<div><div class="k">Elo</div>' + elo + '</div>' +
           '<div><div class="k">Status</div><span class="status">alive</span></div>' +
-          '<div><div class="k">Claimed</div><span class="claimed">0</span></div>' +
-          '<div><div class="k">Path</div><span class="path-len">0</span></div>' +
+          '<div><div class="k">Territory</div><span class="territory">0</span></div>' +
           '<div><div class="k">Win&nbsp;prob</div><span class="prob-pct">0%</span></div>' +
         '</div>' +
         '<div class="prob-bar">' +
@@ -544,8 +543,7 @@ _LIVE_TEMPLATE: Final[str] = """<!DOCTYPE html>
       CARDS.push({
         root: card,
         status: card.querySelector(".status"),
-        claimed: card.querySelector(".claimed"),
-        pathLen: card.querySelector(".path-len"),
+        territory: card.querySelector(".territory"),
         pct: card.querySelector(".prob-pct"),
         fill: card.querySelector(".prob-fill")
       });
@@ -611,8 +609,7 @@ _LIVE_TEMPLATE: Final[str] = """<!DOCTYPE html>
     for (var s = 0; s < INIT.num_players; s++) {
       var c = CARDS[s];
       if (!c) continue;
-      c.claimed.textContent = f.claimed[s];
-      c.pathLen.textContent = f.path_len[s];
+      c.territory.textContent = f.territory[s];
       var pct = Math.round(f.win_probs[s] * 100);
       c.pct.textContent = pct + "%";
       c.fill.style.width = pct + "%";

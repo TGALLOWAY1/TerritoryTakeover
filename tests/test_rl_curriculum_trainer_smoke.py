@@ -76,7 +76,7 @@ def test_two_stage_curriculum_runs_end_to_end(tmp_path: Path) -> None:
     assert (tmp_path / "stage_01_s1_8x8" / "net_final.pt").exists()
     assert (tmp_path / "stage_01_s1_8x8" / "transfer_report.json").exists()
     assert (tmp_path / "net_final.pt").exists()
-    assert (tmp_path / "first_enclosure.csv").exists()
+    assert (tmp_path / "first_blockout.csv").exists()
     assert (tmp_path / "stage_results.json").exists()
     assert (tmp_path / "curriculum_progress.yaml").exists()
 

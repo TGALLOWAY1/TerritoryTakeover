@@ -2,18 +2,18 @@
 
 Three reward paths:
 
-- **Per-step** — each legal move grants ``+per_cell_gain * (1 + claimed)``.
-  The engine already emits this as ``step_result.reward`` on a legal move; we
-  just scale it.
-- **Trap / death** — the transition in which ``PlayerState.alive`` flips
-  ``True -> False`` gets a one-time penalty of ``-trap_penalty_per_cell *
-  path_len``. This covers both the "illegal move" case and the "zero legal
-  actions" case; both are routed through the same engine hook (the player is
-  marked dead either before or during ``_advance_turn``).
+- **Per-step** — each cell claimed grants ``+per_cell_gain``. The engine
+  already emits this as ``step_result.reward`` (1.0 on a claiming move, 0.0
+  on traversal/illegal); we just scale it.
+- **Blockout / death** — the transition in which ``PlayerState.alive`` flips
+  ``True -> False`` (the player got walled out or the board filled) gets a
+  one-time penalty of ``-trap_penalty_per_cell * empty_cells_remaining``:
+  dying while the board is still open means opportunity was surrendered,
+  while dying at a full board is free.
 - **Terminal rank bonus** — at game end, each seat receives a bonus based on
-  its final rank by territory score (``len(path) + claimed_count``). Default
-  ladder ``(+10, +3, -3, -10)``. Ties split the average of the tied-rank
-  slots so the signal stays zero-sum for 2-player ties.
+  its final rank by territory count. Default ladder ``(+10, +3, -3, -10)``.
+  Ties split the average of the tied-rank slots so the signal stays
+  zero-sum for 2-player ties.
 
 Each reward path is intentionally small and pure — the training loop composes
 them; there's no global reward "orchestrator" to keep the code testable.
@@ -45,25 +45,25 @@ class RewardConfig:
 def step_reward(engine_reward: float, cfg: RewardConfig) -> float:
     """Scale the engine's per-step reward by ``cfg.per_cell_gain``.
 
-    The engine returns ``1.0 + claimed_this_turn`` on a legal move and ``0.0``
-    on an illegal move. Multiplying by ``per_cell_gain`` is a no-op with the
+    The engine returns ``1.0`` on a claiming move and ``0.0`` on a traversal
+    or illegal move. Multiplying by ``per_cell_gain`` is a no-op with the
     default ``1.0`` but lets us sweep reward scale without touching the
     training loop.
     """
     return cfg.per_cell_gain * engine_reward
 
 
-def death_penalty(path_len_at_death: int, cfg: RewardConfig) -> float:
+def death_penalty(empty_cells_remaining: int, cfg: RewardConfig) -> float:
     """One-time penalty applied when a player is marked ``alive = False``.
 
-    The magnitude scales with the length of the player's path at the moment
-    of death: losing a long path hurts more than losing a short one. Returns
-    ``0.0`` for ``path_len_at_death == 0`` (never observed in practice but
-    documented as safe).
+    The magnitude scales with the number of EMPTY cells still on the board
+    at the moment of death: being walled out early (much of the board still
+    unclaimed) surrenders far more opportunity than dying at a full board,
+    which is free (``0.0``).
     """
-    if path_len_at_death <= 0:
+    if empty_cells_remaining <= 0:
         return 0.0
-    return -cfg.trap_penalty_per_cell * float(path_len_at_death)
+    return -cfg.trap_penalty_per_cell * float(empty_cells_remaining)
 
 
 def terminal_rank_bonus(
@@ -73,13 +73,13 @@ def terminal_rank_bonus(
 ) -> float:
     """Rank-based terminal bonus for ``player_id`` given terminal ``state``.
 
-    Scores players by ``len(path) + claimed_count``. Higher score => better
+    Scores players by ``territory_count``. Higher score => better
     rank (rank 0 is 1st place). Ties are resolved by averaging the rank
     slots the tied players occupy — so a 2-way tie for 1st gives each tied
     player ``(rank_bonuses[0] + rank_bonuses[1]) / 2``. This keeps the
     signal zero-sum under ``(+10, +3, -3, -10)`` in ties.
     """
-    scores = [float(len(p.path) + p.claimed_count) for p in state.players]
+    scores = [float(p.territory_count) for p in state.players]
     n = len(scores)
     if n == 0:
         return 0.0

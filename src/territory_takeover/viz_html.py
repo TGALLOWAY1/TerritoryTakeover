@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from territory_takeover.eval.heuristic import DEAD_SENTINEL, LinearEvaluator
+from territory_takeover.eval.heuristic import LinearEvaluator
 from territory_takeover.viz import HEAD_EDGE_COLORS, TILE_COLORS
 
 if TYPE_CHECKING:
@@ -92,7 +92,9 @@ def heuristic_win_probs(
         return probs
 
     scores = evaluator.evaluate(state)
-    alive_mask = scores > DEAD_SENTINEL / 2
+    # Dead players keep their territory but cannot gain more; exclude them
+    # from the win-probability softmax only when someone is still alive.
+    alive_mask = np.array([p.alive for p in state.players], dtype=np.bool_)
     if not alive_mask.any():
         return np.full(num_players, 1.0 / num_players, dtype=np.float64)
 
@@ -182,15 +184,13 @@ def _frame_payload(
             f"win_probs shape {win_probs.shape} does not match num_players={num_players}"
         )
     grid_flat: list[int] = state.grid.flatten().tolist()
-    claimed: list[int] = [p.claimed_count for p in state.players]
-    path_len: list[int] = [len(p.path) for p in state.players]
+    territory: list[int] = [p.territory_count for p in state.players]
     alive: list[bool] = [bool(p.alive) for p in state.players]
     heads: list[list[int]] = [[p.head[0], p.head[1]] for p in state.players]
     probs: list[float] = [float(x) for x in win_probs]
     return {
         "grid": grid_flat,
-        "claimed": claimed,
-        "path_len": path_len,
+        "territory": territory,
         "alive": alive,
         "heads": heads,
         "win_probs": probs,
@@ -525,8 +525,7 @@ _TEMPLATE: Final[str] = """<!DOCTYPE html>
         '<div><div class="k">Seat</div>' + (s + 1) + '</div>' +
         '<div><div class="k">Elo</div>' + elo + '</div>' +
         '<div><div class="k">Status</div><span class="status">alive</span></div>' +
-        '<div><div class="k">Claimed</div><span class="claimed">0</span></div>' +
-        '<div><div class="k">Path</div><span class="path-len">0</span></div>' +
+        '<div><div class="k">Territory</div><span class="territory">0</span></div>' +
         '<div><div class="k">Win&nbsp;prob</div><span class="prob-pct">0%</span></div>' +
       '</div>' +
       '<div class="prob-bar">' +
@@ -536,8 +535,7 @@ _TEMPLATE: Final[str] = """<!DOCTYPE html>
     cards.push({
       root: card,
       status: card.querySelector(".status"),
-      claimed: card.querySelector(".claimed"),
-      pathLen: card.querySelector(".path-len"),
+      territory: card.querySelector(".territory"),
       pct: card.querySelector(".prob-pct"),
       fill: card.querySelector(".prob-fill")
     });
@@ -555,8 +553,7 @@ _TEMPLATE: Final[str] = """<!DOCTYPE html>
   function updateSide(f) {
     for (var s = 0; s < NUM; s++) {
       var c = cards[s];
-      c.claimed.textContent = f.claimed[s];
-      c.pathLen.textContent = f.path_len[s];
+      c.territory.textContent = f.territory[s];
       var pct = Math.round(f.win_probs[s] * 100);
       c.pct.textContent = pct + "%";
       c.fill.style.width = pct + "%";

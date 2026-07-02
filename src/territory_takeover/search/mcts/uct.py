@@ -16,9 +16,9 @@ tree reuse across successive calls in the same game — the standard MCTS
 optimization where the subtree below the actually-played joint move is
 promoted to the new root, preserving the visit counts already invested
 there. Reconstruction of the played action sequence is done from
-:attr:`PlayerState.path` deltas (see :func:`reconstruct_actions`); any
-anomaly (missing child, player mismatch, illegal move flagged dead)
-falls back to rebuilding from scratch — never silent corruption.
+per-seat head deltas (see :func:`reconstruct_actions`); any anomaly
+(missing child, player mismatch, non-unit head jump) falls back to
+rebuilding from scratch — never silent corruption.
 """
 
 from __future__ import annotations
@@ -314,8 +314,8 @@ class RootSnapshot:
     """Minimal record of the root state used to detect descent on the next call.
 
     All fields are immutable / value-typed so the snapshot is safe to
-    keep alongside a mutable :class:`MCTSNode`. ``path_lens`` and
-    ``alive`` are tuples (one entry per player) so equality checks are
+    keep alongside a mutable :class:`MCTSNode`. ``heads``, ``territories``
+    and ``alive`` are tuples (one entry per player) so equality checks are
     cheap.
 
     Package-internal: shared with :mod:`territory_takeover.search.mcts.rave`
@@ -324,7 +324,7 @@ class RootSnapshot:
 
     current_player: int
     turn_number: int
-    path_lens: tuple[int, ...]
+    territories: tuple[int, ...]
     heads: tuple[tuple[int, int], ...]
     alive: tuple[bool, ...]
 
@@ -333,7 +333,7 @@ def snapshot_state(state: GameState) -> RootSnapshot:
     return RootSnapshot(
         current_player=state.current_player,
         turn_number=state.turn_number,
-        path_lens=tuple(len(p.path) for p in state.players),
+        territories=tuple(p.territory_count for p in state.players),
         heads=tuple(p.head for p in state.players),
         alive=tuple(p.alive for p in state.players),
     )
@@ -344,65 +344,72 @@ def reconstruct_actions(
 ) -> list[int] | None:
     """Reconstruct the action sequence played between ``snapshot`` and ``state``.
 
-    Replays the engine's round-robin: starting from ``snapshot.current_player``
-    we walk forward, attributing each path-length increase to the seat
-    whose turn it would be at that point. Each new path tail cell minus
-    the prior head determines the action via ``DIRECTIONS``. Returns
-    ``None`` (caller rebuilds the tree) on any anomaly:
+    Between two successive :meth:`UCTAgent.select_action` calls for the
+    same seat, the round-robin gives every seat at most one move, so each
+    seat's head delta identifies its action uniquely (traversal and
+    claiming moves both displace the head by one unit step; the engine
+    never moves a head more than one cell per turn). Seats whose head did
+    not move played no move (dead, or skipped by the liveness check) —
+    the engine creates no tree edge for them either, so they contribute
+    no action.
 
-    - a player's path got shorter (impossible without a state mismatch)
-    - a delta that doesn't match any direction (corruption)
-    - the round-robin can't pick a next mover (stuck before catching up)
+    Walks seats in round-robin order from ``snapshot.current_player`` up
+    to (but excluding) ``state.current_player``. Returns ``None`` (caller
+    rebuilds the tree) on any anomaly:
+
+    - a head delta that isn't a unit direction (more than one move elapsed,
+      or the live state isn't a continuation of the snapshot),
+    - a territory count that shrank (impossible for a continuation),
+    - a seat that was dead in the snapshot but moved anyway.
     """
     n = len(state.players)
-    target_lens = [len(p.path) for p in state.players]
-    cur_lens = list(snapshot.path_lens)
-    cur_heads = list(snapshot.heads)
-
     for i in range(n):
-        if target_lens[i] < cur_lens[i]:
+        if state.players[i].territory_count < snapshot.territories[i]:
             return None
-        # The cell at index cur_lens[i]-1 in the live path must match the
-        # snapshot's recorded head for seat i. If it doesn't, the live
-        # state isn't a continuation of the snapshot at all (e.g., a fresh
-        # game with permuted spawns) — bail and rebuild.
-        if cur_lens[i] >= 1 and state.players[i].path[cur_lens[i] - 1] != cur_heads[i]:
-            return None
+    if state.turn_number < snapshot.turn_number:
+        return None
+    if state.turn_number - snapshot.turn_number > n:
+        # More than one full round elapsed; per-seat head deltas can no
+        # longer disambiguate multi-move sequences.
+        return None
 
     actions: list[int] = []
     seat = snapshot.current_player
-    # Bound the loop generously so a corrupted snapshot can't spin.
-    max_iters = sum(target_lens[i] - cur_lens[i] for i in range(n)) + n + 1
-
-    for _ in range(max_iters):
-        if cur_lens == target_lens:
-            return actions
-        # Try to attribute a move to `seat`. If they have moves left,
-        # record one; otherwise advance to the next seat that still
-        # owes a move (mirroring the engine's round-robin skip).
-        if cur_lens[seat] < target_lens[seat]:
-            new_cell = state.players[seat].path[cur_lens[seat]]
-            old_r, old_c = cur_heads[seat]
-            new_r, new_c = new_cell
-            delta = (new_r - old_r, new_c - old_c)
+    for _ in range(n):
+        old_head = snapshot.heads[seat]
+        new_head = state.players[seat].head
+        if new_head != old_head:
+            if not snapshot.alive[seat]:
+                return None
+            delta = (new_head[0] - old_head[0], new_head[1] - old_head[1])
             if delta not in DIRECTIONS:
                 return None
             actions.append(DIRECTIONS.index(delta))
-            cur_lens[seat] += 1
-            cur_heads[seat] = new_cell
-        # Advance round-robin to the next seat with remaining moves.
-        next_seat = -1
-        for off in range(1, n + 1):
-            cand = (seat + off) % n
-            if cur_lens[cand] < target_lens[cand]:
-                next_seat = cand
-                break
-        if next_seat == -1:
-            # Nobody else owes a move; we should be done.
-            return actions if cur_lens == target_lens else None
-        seat = next_seat
+        seat = (seat + 1) % n
+        if seat == state.current_player:
+            return actions
+    # Walked a full round without landing on the live current player —
+    # only consistent when zero turns elapsed (same state).
+    return actions if state.turn_number == snapshot.turn_number else None
 
-    return None
+
+def states_equivalent(node_state: GameState, live_state: GameState) -> bool:
+    """Cheap game-equivalence check between a tree node's state and the live state.
+
+    Used as the final guard before promoting a reused subtree: the head-delta
+    reconstruction cannot represent turns that left no trace (an illegal
+    no-op move wastes a turn without moving a head or creating a tree edge),
+    so descent can land on a node whose state diverges from the live game.
+    Compares current player, per-seat heads/alive flags, and the full grid
+    (int8 memcmp — cheap). ``turn_number`` is deliberately NOT compared:
+    no-op turns shift it without affecting play.
+    """
+    if node_state.current_player != live_state.current_player:
+        return False
+    for a, b in zip(node_state.players, live_state.players, strict=True):
+        if a.head != b.head or a.alive != b.alive:
+            return False
+    return bool(np.array_equal(node_state.grid, live_state.grid))
 
 
 class UCTAgent:
@@ -544,6 +551,8 @@ class UCTAgent:
                 return None
             node = child
         if node.player_to_move != player_id:
+            return None
+        if not states_equivalent(node.state, state):
             return None
         # Detach from the discarded supertree so backprop stops at the new root
         # and the older subtrees can be garbage collected.

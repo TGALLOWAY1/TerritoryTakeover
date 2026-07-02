@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from territory_takeover.actions import legal_actions
+from territory_takeover.constants import OWNED_CODES
 from territory_takeover.engine import new_game, step
 from territory_takeover.eval.heuristic import default_evaluator
 from territory_takeover.search.agent import Agent
@@ -50,11 +51,25 @@ def test_heuristic_win_probs_sums_to_one() -> None:
 
 
 def test_heuristic_win_probs_dead_player_is_zero() -> None:
+    # Dead players keep their territory but are excluded from the softmax
+    # while anyone is still alive (no DEAD_SENTINEL — plain alive flags).
     state = new_game(8, 2, seed=0)
     state.players[1].alive = False
+    state.alive_count = 1
     probs = heuristic_win_probs(state, default_evaluator())
     assert probs[1] == 0.0
     assert np.isclose(probs[0], 1.0)
+
+
+def test_heuristic_win_probs_all_dead_is_uniform() -> None:
+    # A live (non-terminal) state where every player is dead falls back to
+    # a uniform vector rather than dividing by a zero total.
+    state = new_game(8, 4, seed=0)
+    for p in state.players:
+        p.alive = False
+    state.alive_count = 0
+    probs = heuristic_win_probs(state, default_evaluator())
+    assert np.allclose(probs, 0.25)
 
 
 def test_heuristic_win_probs_rejects_bad_temperature() -> None:
@@ -65,8 +80,7 @@ def test_heuristic_win_probs_rejects_bad_temperature() -> None:
 
 def test_heuristic_win_probs_terminal_matches_winner() -> None:
     # At a terminal state, the probability vector should reflect the
-    # engine's computed winner rather than the heuristic's alive-filtered
-    # softmax (the winner can be a dead-by-territory player).
+    # engine's computed winner (argmax territory) rather than the softmax.
     state = new_game(8, 2, seed=0)
     state.done = True
     state.winner = 1
@@ -132,6 +146,43 @@ def test_build_payload_frame_shape() -> None:
     assert isinstance(first, dict)
     assert len(first["grid"]) == 8 * 8
     assert len(first["win_probs"]) == 2
+
+
+def test_frame_payload_schema_pins_territory_key() -> None:
+    # 'territory' replaced the old 'claimed' + 'path_len' pair. Pin the exact
+    # key set — the HTML/JS template and the Arena front end read these names.
+    traj = _short_trajectory(steps=2)
+    probs = [heuristic_win_probs(s, default_evaluator()) for s in traj]
+    cards = [
+        AgentCard(seat=0, name="a", strategy="random", elo=None),
+        AgentCard(seat=1, name="b", strategy="random", elo=None),
+    ]
+    payload = build_payload(
+        trajectory=traj,
+        agent_cards=cards,
+        win_probs_per_frame=probs,
+        title="t",
+        fps=4,
+    )
+    frames = payload["frames"]
+    assert isinstance(frames, list)
+    expected_keys = {
+        "grid", "territory", "alive", "heads",
+        "win_probs", "turn", "current_player", "done", "winner",
+    }
+    for i, frame in enumerate(frames):
+        assert isinstance(frame, dict)
+        assert set(frame) == expected_keys, f"frame={i}"
+    first = frames[0]
+    # The spawn cell counts as territory, so both seats start at 1.
+    assert first["territory"] == [1, 1]
+    # Territory equals the grid's per-seat owned-cell counts in every frame.
+    for i, (frame, state) in enumerate(zip(frames, traj, strict=True)):
+        grid = np.asarray(frame["grid"], dtype=np.int8)
+        for pid in range(2):
+            owned = int((grid == OWNED_CODES[pid]).sum())
+            assert frame["territory"][pid] == owned, f"frame={i} pid={pid}"
+            assert frame["territory"][pid] == state.players[pid].territory_count
 
 
 def test_build_payload_length_mismatch_raises() -> None:
@@ -221,6 +272,8 @@ def test_save_game_html_smoke(tmp_path: Path) -> None:
     assert payload["agents"][1]["elo"] is None  # None → rendered as "—"
     assert payload["agents"][0]["elo"] == pytest.approx(88.6)
     assert len(payload["frames"]) == len(traj)
+    # The palette embeds one color per tile code: EMPTY + 4 owned.
+    assert len(payload["tile_colors"]) == 5
 
 
 def test_load_elo_csv_roundtrip(tmp_path: Path) -> None:
@@ -240,20 +293,19 @@ def test_load_elo_csv_missing_file_raises(tmp_path: Path) -> None:
         load_elo_csv(tmp_path / "does-not-exist.csv")
 
 
-def test_win_probs_respond_to_claimed_territory() -> None:
+def test_win_probs_respond_to_territory_lead() -> None:
     # When a player has a clear territorial lead, the heuristic win-prob
     # estimator should assign them the larger share.
     state = new_game(10, 2, seed=0)
-    # Force a few no-op style moves so RAVE/greedy would differ, then
-    # synthetically boost player 0's claimed count to simulate a lead.
-    from territory_takeover.constants import CLAIMED_CODES
-
-    lead_code = CLAIMED_CODES[0]
+    # Synthetically grow player 0's territory (connected to nothing in
+    # particular — the heuristic only reads counts and grid ownership).
+    lead_code = OWNED_CODES[0]
     for r in range(3, 7):
         for c in range(3, 7):
             if state.grid[r, c] == 0:
                 state.grid[r, c] = lead_code
-                state.players[0].claimed_count += 1
+                state.players[0].territory_count += 1
+                state.empty_count -= 1
 
     probs = heuristic_win_probs(state, default_evaluator())
     assert probs[0] > probs[1]
@@ -261,8 +313,8 @@ def test_win_probs_respond_to_claimed_territory() -> None:
 
 
 def test_end_to_end_short_game_html(tmp_path: Path) -> None:
-    # Run a 2-player game to termination with a tiny RAVE budget so the test
-    # stays fast, then render HTML end-to-end.
+    # Run a 2-player game with a tiny RAVE budget so the test stays fast,
+    # then render HTML end-to-end.
     rng0 = np.random.default_rng(0)
     rng1 = np.random.default_rng(1)
     agents: list[Agent] = [
@@ -274,7 +326,7 @@ def test_end_to_end_short_game_html(tmp_path: Path) -> None:
     traj = [state.copy()]
     probs = [heuristic_win_probs(state, default_evaluator())]
 
-    turns_cap = 120
+    turns_cap = 400
     turns = 0
     while not state.done and turns < turns_cap:
         seat = state.current_player
