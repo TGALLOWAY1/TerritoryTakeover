@@ -179,8 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     trajectory = play_game(roster, cfg)
     final = trajectory[-1]
     territory = [
-        len(final.players[p].path) + final.players[p].claimed_count
-        for p in range(cfg.num_players)
+        final.players[p].territory_count for p in range(cfg.num_players)
     ]
     print(
         f"[growth] final: turn={final.turn_number} winner={final.winner} "
