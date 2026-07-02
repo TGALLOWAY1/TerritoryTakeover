@@ -6,12 +6,12 @@ information for tractability:
 
     (head_r, head_c, nbr_N, nbr_S, nbr_W, nbr_E, phase)
 
-Each ``nbr_*`` is one of six categorical classes (out-of-bounds, empty,
-own-path, own-claim, any-opponent-path, any-opponent-claim) so that the same
-encoder shape works for 2- and 4-player variants — all opponents collapse into
-a single ``opp`` class. ``phase`` is a coarse 4-level bucket over the fraction
-of the grid that is still empty, which lets the agent learn early-vs-late
-strategy without blowing up the state space.
+Each ``nbr_*`` is one of four categorical classes (out-of-bounds, empty,
+own territory, any-opponent territory) so that the same encoder shape works
+for 2- and 4-player variants — all opponents collapse into a single ``opp``
+class. ``phase`` is a coarse 4-level bucket over the fraction of the grid
+that is still empty, which lets the agent learn early-vs-late strategy
+without blowing up the state space.
 
 The design deliberately drops everything but the current head's 4-neighborhood
 and a global phase cue. That's the ceiling of what a tabular method can learn
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from territory_takeover.constants import CLAIMED_CODES, DIRECTIONS, EMPTY, PATH_CODES
+from territory_takeover.constants import DIRECTIONS, EMPTY, OWNED_CODES
 
 if TYPE_CHECKING:
     from territory_takeover.state import GameState
@@ -32,10 +32,8 @@ if TYPE_CHECKING:
 
 NBR_OOB: Final[int] = 0
 NBR_EMPTY: Final[int] = 1
-NBR_OWN_PATH: Final[int] = 2
-NBR_OWN_CLAIM: Final[int] = 3
-NBR_OPP_PATH: Final[int] = 4
-NBR_OPP_CLAIM: Final[int] = 5
+NBR_OWN: Final[int] = 2
+NBR_OPP: Final[int] = 3
 
 # --- Game-phase buckets ---------------------------------------------------
 
@@ -57,24 +55,15 @@ indexing.
 """
 
 
-def _classify_cell(
-    code: int,
-    own_path_code: int,
-    own_claim_code: int,
-) -> int:
+def _classify_cell(code: int, own_code: int) -> int:
     """Map a raw grid value to one of the neighbor enums."""
     if code == EMPTY:
         return NBR_EMPTY
-    if code == own_path_code:
-        return NBR_OWN_PATH
-    if code == own_claim_code:
-        return NBR_OWN_CLAIM
-    for p in PATH_CODES:
-        if code == p:
-            return NBR_OPP_PATH
-    for c in CLAIMED_CODES:
+    if code == own_code:
+        return NBR_OWN
+    for c in OWNED_CODES:
         if code == c:
-            return NBR_OPP_CLAIM
+            return NBR_OPP
     # Unknown grid code — should not happen in a well-formed state. Fall back
     # to EMPTY rather than raising, since the Q-table is a heuristic anyway
     # and we do not want to destabilize training on a malformed tile.
@@ -113,14 +102,13 @@ def encode_state(state: GameState, player_id: int) -> StateKey:
     r, c = player.head
     grid = state.grid
     h, w = grid.shape
-    own_path_code = PATH_CODES[player_id]
-    own_claim_code = CLAIMED_CODES[player_id]
+    own_code = OWNED_CODES[player_id]
 
     cells: list[int] = []
     for dr, dc in DIRECTIONS:
         nr, nc = r + dr, c + dc
         if 0 <= nr < h and 0 <= nc < w:
-            cells.append(_classify_cell(int(grid.item(nr, nc)), own_path_code, own_claim_code))
+            cells.append(_classify_cell(int(grid.item(nr, nc)), own_code))
         else:
             cells.append(NBR_OOB)
 
@@ -131,10 +119,8 @@ def encode_state(state: GameState, player_id: int) -> StateKey:
 __all__ = [
     "NBR_EMPTY",
     "NBR_OOB",
-    "NBR_OPP_CLAIM",
-    "NBR_OPP_PATH",
-    "NBR_OWN_CLAIM",
-    "NBR_OWN_PATH",
+    "NBR_OPP",
+    "NBR_OWN",
     "PHASE_EARLY",
     "PHASE_END",
     "PHASE_LATE",

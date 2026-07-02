@@ -46,7 +46,7 @@ def state_hash(state: GameState, active_player: int) -> int:
     """Hash a ``(state, active_player)`` pair for evaluator caching.
 
     The grid bytes + active_player + each player's head position uniquely
-    identify what the encoder produces. claimed_count is implicit in the
+    identify what the encoder produces. territory_count is implicit in the
     grid. Turn number isn't hashed because two states with the same grid
     and head positions are symmetric from the network's perspective — turn
     only varies a scalar feature that normalizes to the same bucket within

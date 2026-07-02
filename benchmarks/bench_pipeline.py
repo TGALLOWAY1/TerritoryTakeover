@@ -104,7 +104,7 @@ def _or(*preds: Callable[[str, str], bool]) -> Callable[[str, str], bool]:
 # methods by short funcname (``copy``) but the filename pins it to
 # ``state.py``.
 SEARCH_BUCKETS: list[BucketRule] = [
-    ("enclosure", _file_and_fn("engine.py", "detect_and_apply_enclosure", "_bfs")),
+    ("liveness", _file_and_fn("engine.py", "has_reachable_empty", "_bfs")),
     ("state_copy", _file_any_of("territory_takeover/state.py")),
     ("legal_actions", _file_and_fn(
         "actions.py",
@@ -137,7 +137,7 @@ SEARCH_BUCKETS: list[BucketRule] = [
 
 # Ladder for AlphaZero training workloads.
 AZ_BUCKETS: list[BucketRule] = [
-    ("enclosure", _file_and_fn("engine.py", "detect_and_apply_enclosure", "_bfs")),
+    ("liveness", _file_and_fn("engine.py", "has_reachable_empty", "_bfs")),
     ("state_copy", _file_any_of("territory_takeover/state.py")),
     ("legal_actions", _file_and_fn(
         "actions.py",

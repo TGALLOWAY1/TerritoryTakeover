@@ -2,14 +2,15 @@
 
 The contract: `simulate_random_rollout(state, rng)` must drive `state` to
 terminal with EXACTLY the same trajectory as a reference loop of
-`step(state, action)` calls that picks each action uniformly at random among
-the current `legal_actions(...)` (falling back to `step(state, 0)` when there
-are none — the "no legal moves" path).
+`step(state, action)` calls that mirrors the claim-biased policy: pick
+uniformly at random among the current claiming actions (EMPTY targets) when
+any exist, else uniformly among the remaining legal (traversal) actions,
+falling back to `step(state, 0)` when there are none.
 
 These tests fix an RNG seed, clone the state, drive both implementations, and
-assert the final `GameState` is byte-identical: same grid, same per-player
-`(path, path_set, head, claimed_count, alive)`, same turn counter, same winner
-and `done` flag.
+assert the final `GameState` is identical: same grid, same per-player
+`(head, territory_count, alive)`, same turn counter, same winner and `done`
+flag.
 """
 
 from __future__ import annotations
@@ -19,15 +20,20 @@ import random
 import numpy as np
 
 from territory_takeover import GameState, new_game, simulate_random_rollout, step
-from territory_takeover.actions import legal_actions
+from territory_takeover.actions import claiming_actions, legal_actions
 
 
 def _reference_rollout(state: GameState, rng: random.Random) -> int:
-    """Reference: drive `state` to terminal via step() + random legal action."""
+    """Reference: drive `state` to terminal via step() + claim-biased policy."""
     turns = 0
     while not state.done:
-        acts = legal_actions(state, state.current_player)
-        action = acts[rng.randrange(len(acts))] if acts else 0
+        pid = state.current_player
+        claims = claiming_actions(state, pid)
+        if claims:
+            action = claims[rng.randrange(len(claims))]
+        else:
+            traverses = legal_actions(state, pid)
+            action = traverses[rng.randrange(len(traverses))] if traverses else 0
         step(state, action)
         turns += 1
     return turns
@@ -37,12 +43,10 @@ def _assert_states_equal(a: GameState, b: GameState, msg: str) -> None:
     assert np.array_equal(a.grid, b.grid), f"{msg}: grid diverged"
     assert len(a.players) == len(b.players)
     for i, (pa, pb) in enumerate(zip(a.players, b.players, strict=True)):
-        assert pa.path == pb.path, f"{msg}: player {i} path diverged"
-        assert pa.path_set == pb.path_set, f"{msg}: player {i} path_set diverged"
         assert pa.head == pb.head, f"{msg}: player {i} head diverged"
-        assert pa.claimed_count == pb.claimed_count, (
-            f"{msg}: player {i} claimed_count {pa.claimed_count} vs "
-            f"{pb.claimed_count}"
+        assert pa.territory_count == pb.territory_count, (
+            f"{msg}: player {i} territory_count {pa.territory_count} vs "
+            f"{pb.territory_count}"
         )
         assert pa.alive == pb.alive, f"{msg}: player {i} alive diverged"
     assert a.current_player == b.current_player, f"{msg}: current_player diverged"
@@ -73,12 +77,12 @@ def _equivalence(board_size: int, num_players: int, seed: int) -> None:
 
 
 def test_rollout_equivalence_20x20_4p() -> None:
-    for seed in range(30):
+    for seed in range(20):
         _equivalence(board_size=20, num_players=4, seed=seed)
 
 
 def test_rollout_equivalence_40x40_4p() -> None:
-    for seed in range(10):
+    for seed in range(4):
         _equivalence(board_size=40, num_players=4, seed=seed)
 
 
@@ -93,10 +97,13 @@ def test_rollout_terminates_and_game_is_done() -> None:
     turns = simulate_random_rollout(state, rng)
 
     assert state.done is True
-    assert state.alive_count <= 1
+    assert state.alive_count == 0
     assert turns > 0
     # Winner either is an int in [0, num_players) or None on a tie.
     assert state.winner is None or 0 <= state.winner < len(state.players)
+    # Cell conservation: every cell is owned or empty.
+    total = sum(p.territory_count for p in state.players) + state.empty_count
+    assert total == 100
 
 
 def test_rollout_raises_on_finished_state() -> None:

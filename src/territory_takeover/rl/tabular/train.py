@@ -139,7 +139,7 @@ def _run_one_episode(
 
         # Death penalty: if this move flipped the mover's alive False.
         if prev_alive[seat] and not state.players[seat].alive:
-            penalty = death_penalty(len(state.players[seat].path), cfg.reward)
+            penalty = death_penalty(state.empty_count, cfg.reward)
             pending_reward[seat] += penalty
             ep_return[seat] += penalty
             prev_alive[seat] = False
@@ -147,9 +147,7 @@ def _run_one_episode(
         # _advance_turn may also mark other seats dead on no-legal-moves.
         for other in range(cfg.num_players):
             if prev_alive[other] and not state.players[other].alive:
-                penalty = death_penalty(
-                    len(state.players[other].path), cfg.reward
-                )
+                penalty = death_penalty(state.empty_count, cfg.reward)
                 pending_reward[other] += penalty
                 ep_return[other] += penalty
                 prev_alive[other] = False

@@ -3,7 +3,7 @@
 The network is intentionally small — the residual trunk lands in Phase 3c.
 Layout:
 
-1. Four Conv2d(3x3, padding=1, 64 channels) + ReLU on the ``(2N + 2, H, W)``
+1. Four Conv2d(3x3, padding=1, 64 channels) + ReLU on the ``(N + 2, H, W)``
    grid tensor.
 2. Global average pool to a ``(64,)`` feature vector.
 3. Concatenate scalar features ``(3 + N,)``.
@@ -49,7 +49,7 @@ class PpoNetConfig:
 
     @property
     def grid_in_channels(self) -> int:
-        return 2 * self.num_players + 2
+        return self.num_players + 2
 
     @property
     def scalar_feature_dim(self) -> int:

@@ -1,6 +1,6 @@
 """Rollout / playout policies used by MCTS.
 
-The default :func:`uniform_rollout` simulates uniformly-random play to
+The default :func:`uniform_rollout` simulates claim-biased random play to
 the end of the episode and returns the per-player territory vector
 normalized to ``[0, 1]`` (see :func:`_terminal_value`). Normalization to
 a fixed range is what lets the UCB exploration constant ``c`` stay
@@ -14,15 +14,9 @@ NDArray[np.float64]`` of shape ``(num_players,)``. The caller in
 Two non-uniform policies live alongside the default:
 
 - :func:`informed_rollout` — epsilon-greedy soft-scored policy. Each move
-  combines a 1-step reachable proxy, an enclosure-closure bonus (trigger
-  check + full simulation when the candidate touches own-path), a near-
-  trap penalty, and a small pull away from the nearest opponent head.
-  Baseline per-decision cost is ~5 us; the enclosure simulation branch
-  fires on ~25% of scored actions and pushes amortized cost to ~25 us
-  per move on mid-size boards. A flat-bonus alternative (no simulation)
-  was tried first and measurably *hurt* playing strength — real claimed-
-  count delta is needed to distinguish actual loop closures from moves
-  that merely touch own-path.
+  combines a claim bonus (EMPTY targets beat traversal moves), a frontier
+  proxy (empty-neighbor count of the target cell), and — in the Voronoi
+  variant — a pull toward the centroid of the player's Voronoi region.
 - :func:`voronoi_guided_rollout` — heavier policy that recomputes a
   Voronoi partition every ``k`` steps and biases moves toward the
   centroid of the current player's owned region. Slower per step but
@@ -36,15 +30,17 @@ Two non-uniform policies live alongside the default:
 from __future__ import annotations
 
 import math
+import random as _pyrandom
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from territory_takeover.actions import legal_actions
-from territory_takeover.constants import DIRECTIONS, EMPTY, PATH_CODES
+from territory_takeover.constants import DIRECTIONS, EMPTY
 from territory_takeover.engine import step
 from territory_takeover.eval.voronoi import voronoi_partition
+from territory_takeover.rollout import simulate_random_rollout
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -56,42 +52,31 @@ RolloutFn = Callable[["GameState", np.random.Generator], "NDArray[np.float64]"]
 
 
 # --- informed_rollout hyperparameters ---------------------------------------
-# Weights were chosen so the enclosure-closure bonus dominates when it fires
-# (that's the whole point of the heuristic) while reach / mobility / opponent
-# terms give smooth gradients in ordinary play. Divided by `_TAU = 0.5` inside
-# softmax so typical score differences of 1-5 translate to peaked-but-soft
-# sampling distributions.
+# Weights were chosen so the claim bonus dominates (claiming a cell is worth
+# a point; traversal is not) while the frontier term gives smooth gradients
+# among claiming moves and steers traversal moves back toward open space.
+# Divided by `_TAU = 0.5` inside softmax so typical score differences of 1-5
+# translate to peaked-but-soft sampling distributions.
+_W_CLAIM: float = 3.0
 _W_REACH: float = 1.0
-_W_ENCLOSE: float = 3.0
 _W_VORONOI: float = 0.2
 _TAU: float = 0.5
 _IDENTICAL_SCORE_EPS: float = 1e-9
 _DEFAULT_EPSILON: float = 0.15
 _DEFAULT_VORONOI_K: int = 4
 
-# Hard dead-end / near-trap penalties. Empirically chosen: gentler values
-# (e.g. a flat -5 on near-trap) produced a rollout that was no stronger than
-# uniform in matched-iteration tournaments. Making the dead-end case
-# unambiguously dominated and the near-trap case strongly discouraged moves
-# MCTS's leaf values closer to a sensible "don't voluntarily trap yourself"
-# baseline. The magnitudes exceed any other score component so softmax with
-# ``tau = 0.5`` assigns trap moves effectively zero probability.
-_TRAP_SCORE_DEADEND: float = -100.0
-_TRAP_SCORE_SINGLE_EXIT: float = -10.0
-
 
 def _terminal_value(state: GameState) -> NDArray[np.float64]:
-    """Per-player ``(path_length + claimed_count) / board_area`` in ``[0, 1]``.
+    """Per-player ``territory_count / board_area`` in ``[0, 1]``.
 
     The grid is square so ``state.grid.size`` is the total number of
-    cells (board area). Path tiles plus claimed tiles is the same
-    quantity used by :func:`territory_takeover.engine._compute_winner`,
-    so the rollout's leaf value is consistent with the engine's notion
-    of "territory".
+    cells (board area). Territory count is the same quantity used by
+    :func:`territory_takeover.engine._compute_winner`, so the rollout's
+    leaf value is consistent with the engine's notion of "territory".
     """
     area = float(state.grid.size)
     return np.array(
-        [(len(p.path) + p.claimed_count) / area for p in state.players],
+        [p.territory_count / area for p in state.players],
         dtype=np.float64,
     )
 
@@ -99,22 +84,17 @@ def _terminal_value(state: GameState) -> NDArray[np.float64]:
 def uniform_rollout(
     state: GameState, rng: np.random.Generator
 ) -> NDArray[np.float64]:
-    """Play uniformly-random legal moves until the game ends; return leaf value.
+    """Play claim-biased random moves until the game ends; return leaf value.
 
-    Mutates ``state`` in place. The engine's :func:`_advance_turn` skips
-    seats with no legal moves (marking them ``alive = False``) so the
-    current player at any non-terminal state is guaranteed to have at
-    least one legal action; the empty-``legal`` branch is purely
-    defensive.
+    Mutates ``state`` in place. Delegates to
+    :func:`territory_takeover.rollout.simulate_random_rollout` (uniform
+    among claiming moves when any exist, else uniform among traversal
+    moves) — a policy that terminates orders of magnitude faster than
+    uniform-over-all-legal-moves, which would random-walk over
+    already-owned cells.
     """
-    while not state.done:
-        legal = legal_actions(state, state.current_player)
-        # Defensive: engine invariant says current_player always has legal
-        # moves at a non-terminal state (_advance_turn skips dead seats).
-        # If somehow not, fall back to action 0 with strict=False so the
-        # engine marks the player dead and advances rather than raising.
-        action = legal[int(rng.integers(len(legal)))] if legal else 0
-        step(state, action, strict=False)
+    seed = int(rng.integers(0, 2**63))
+    simulate_random_rollout(state, _pyrandom.Random(seed))
     return _terminal_value(state)
 
 
@@ -128,24 +108,20 @@ def _score_action(
 ) -> float:
     """Compute the soft-score of playing ``action`` from the current head.
 
-    Three components survived matched-iteration tournament testing:
+    Components:
 
-    - a steep near-trap penalty (hard-avoid dead-ends, strongly avoid
-      single-exit cells, otherwise reward by empty-neighbor count),
-    - an enclosure-closure bonus that runs a full ``state.copy() + step()``
-      when the candidate is adjacent to a same-player path tile other than
-      the current head and reads the real ``claimed_count`` delta (a flat
-      bonus without simulation was measurably *worse* than uniform — the
-      trigger fires on many moves that touch own-path without enclosing
-      anything),
+    - a claim bonus when the target cell is EMPTY (claiming scores a point;
+      traversal over own territory does not),
+    - a frontier proxy: the empty-neighbor count of the target cell, which
+      prefers claiming moves that keep options open and steers traversal
+      moves back toward open space,
     - an optional Voronoi-centroid pull used only by
       :func:`voronoi_guided_rollout`.
 
-    An opponent-distance bonus was tried and dropped; at the 200-iteration
-    / 10x10 benchmark it added variance without improving win rate. The
-    enclosure branch fires on ~25% of scored actions under random-ish play
-    so amortized cost is ~25 us per move, above the original 10 us design
-    target but a clear net win at matched iterations (measured).
+    Under the corrected rules there is no self-trap death — a player can
+    always walk back through their own territory — so the steep dead-end
+    penalties of the old ruleset are gone: claiming into a one-cell pocket
+    is cleanup, not suicide.
     """
     dr, dc = DIRECTIONS[action]
     tr = head_r + dr
@@ -153,9 +129,9 @@ def _score_action(
     grid = state.grid
     h, w = grid.shape
 
-    # Count EMPTY 4-neighbors of the candidate target t = (tr, tc). The
-    # previous head at (head_r, head_c) is already a PATH tile on the grid,
-    # so the grid.item check naturally excludes it from the empty count.
+    score = _W_CLAIM if grid.item(tr, tc) == EMPTY else 0.0
+
+    # Count EMPTY 4-neighbors of the candidate target t = (tr, tc).
     empty_neighbors = 0
     if tr > 0 and grid.item(tr - 1, tc) == EMPTY:
         empty_neighbors += 1
@@ -165,46 +141,7 @@ def _score_action(
         empty_neighbors += 1
     if tc < w - 1 and grid.item(tr, tc + 1) == EMPTY:
         empty_neighbors += 1
-
-    # Steep trap schedule: a move that traps immediately is essentially
-    # disqualified; single-exit moves are strongly discouraged; beyond that,
-    # more empty neighbors is linearly better.
-    if empty_neighbors == 0:
-        score = _TRAP_SCORE_DEADEND
-    elif empty_neighbors == 1:
-        score = _TRAP_SCORE_SINGLE_EXIT
-    else:
-        score = _W_REACH * float(empty_neighbors)
-
-    # Enclosure-closure bonus. Cheap trigger check (~4 lookups). When it
-    # fires we pay a full ``state.copy() + step()`` to read the true
-    # ``claimed_count`` delta and reward only real loop closures.
-    if len(state.players[player_id].path) >= 4:
-        own_code = PATH_CODES[player_id]
-        trigger = False
-        if tr > 0:
-            nr, nc = tr - 1, tc
-            if (nr, nc) != (head_r, head_c) and grid.item(nr, nc) == own_code:
-                trigger = True
-        if not trigger and tr < h - 1:
-            nr, nc = tr + 1, tc
-            if (nr, nc) != (head_r, head_c) and grid.item(nr, nc) == own_code:
-                trigger = True
-        if not trigger and tc > 0:
-            nr, nc = tr, tc - 1
-            if (nr, nc) != (head_r, head_c) and grid.item(nr, nc) == own_code:
-                trigger = True
-        if not trigger and tc < w - 1:
-            nr, nc = tr, tc + 1
-            if (nr, nc) != (head_r, head_c) and grid.item(nr, nc) == own_code:
-                trigger = True
-        if trigger:
-            baseline = state.players[player_id].claimed_count
-            succ = state.copy()
-            step(succ, action, strict=False)
-            delta = succ.players[player_id].claimed_count - baseline
-            if delta > 0:
-                score += _W_ENCLOSE * float(delta)
+    score += _W_REACH * float(empty_neighbors)
 
     # Voronoi pull (only when running voronoi_guided_rollout and the player
     # actually owns territory in the current partition).
@@ -266,9 +203,9 @@ def informed_rollout(
         pid = state.current_player
         legal = legal_actions(state, pid)
         if not legal:
-            # Defensive — mirrors uniform_rollout. The engine should have
-            # marked this seat dead already; if not, step(strict=False)
-            # will.
+            # Defensive: the engine's turn-advance only hands the move to
+            # seats that can still claim, so this should be unreachable; a
+            # no-op step lets the engine's liveness check clean up.
             step(state, 0, strict=False)
             continue
         if len(legal) == 1:
@@ -291,8 +228,8 @@ def _voronoi_centroid(
 ) -> tuple[float, float] | None:
     """Return the mean (row, col) of cells owned by ``player_id`` in ``voronoi``.
 
-    Returns ``None`` when the player owns zero cells (early game, pre-any
-    claim). Callers skip the Voronoi-pull score component in that case.
+    Returns ``None`` when the player owns zero cells. Callers skip the
+    Voronoi-pull score component in that case.
     """
     owned = np.argwhere(voronoi == player_id)
     if owned.shape[0] == 0:

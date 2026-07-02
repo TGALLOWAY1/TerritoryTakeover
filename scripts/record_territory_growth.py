@@ -89,17 +89,14 @@ def render_plot(
     import matplotlib.pyplot as plt
 
     turns = [s.turn_number for s in trajectory]
-    # Total territory = path length + claimed count (the scoring formula
-    # used by `compute_terminal_reward("relative")` and by the baseline
+    # Total territory = visited-cell count (the scoring formula used by
+    # `compute_terminal_reward("relative")` and by the baseline
     # leaderboard's tie-break).
     territory_per_player = [
-        [len(s.players[p].path) + s.players[p].claimed_count for s in trajectory]
+        [s.players[p].territory_count for s in trajectory]
         for p in range(cfg.num_players)
     ]
-    claimed_per_player = [
-        [s.players[p].claimed_count for s in trajectory]
-        for p in range(cfg.num_players)
-    ]
+    claimed_per_player = territory_per_player
 
     fig, (ax_top, ax_bot) = plt.subplots(
         2, 1, figsize=(9, 7), sharex=True, gridspec_kw={"height_ratios": [3, 2]}

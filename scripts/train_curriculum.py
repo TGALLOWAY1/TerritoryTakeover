@@ -120,7 +120,7 @@ def main() -> None:
             f"  {r.name:20s} steps={r.self_play_steps:6d} "
             f"iters={r.num_iterations:4d} "
             f"win_rate_vs_random={r.final_win_rate_vs_random:.3f} "
-            f"first_enc_step={r.first_enclosure_step}"
+            f"first_blockout_step={r.first_blockout_step}"
         )
     print(f"[curriculum] final checkpoint: {out_dir / 'net_final.pt'}")
 

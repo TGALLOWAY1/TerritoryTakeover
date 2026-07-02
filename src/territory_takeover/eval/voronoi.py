@@ -1,9 +1,16 @@
 """Multi-source BFS Voronoi partition over a :class:`GameState`.
 
-Each living player's head is seeded at distance 0; a cell is labelled with the
-player whose head reaches it first, ``-1`` when the cell is unreachable
-(walls, claimed territory, opponent paths) or equidistant from more than one
-player (contested). This is the standard Tron-AI notion of territory.
+Every living player's *entire territory* is seeded at distance 0 — under
+the corrected rules a player may traverse their own cells freely, so any
+owned cell is a potential departure point. A cell is labelled with the
+player whose territory reaches it first, ``-1`` when the cell is
+unreachable (owned by nobody and walled off from everyone) or equidistant
+from more than one player (contested). This is the standard Tron-AI notion
+of territory, adapted to territory-permeable movement.
+
+A useful corollary: an EMPTY pocket sealed off by one player's wall is
+reachable only by that player, so the partition attributes it to them at
+whatever distance — "reserved" regions show up automatically.
 """
 
 from __future__ import annotations
@@ -13,7 +20,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from territory_takeover.constants import EMPTY
+from territory_takeover.constants import EMPTY, OWNED_CODES
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -25,9 +32,9 @@ def voronoi_partition(state: GameState) -> NDArray[np.int8]:
     """Return an (H, W) int8 array labelling each cell with its BFS owner.
 
     Values: ``0..3`` for the winning player, ``-1`` for unreachable or
-    contested cells. Walls are any non-``EMPTY`` tile (paths, including other
-    players' heads, and claimed territory). Living players' own head cells are
-    seeded at distance 0 and therefore carry their owner in the output.
+    contested cells. Each living player's owned cells are seeded at
+    distance 0 (and therefore carry their owner in the output); expansion
+    is over EMPTY cells only — other players' territory is a wall.
 
     The hot loop runs over flat Python lists rather than numpy arrays because
     numpy's scalar indexing overhead dominates for small boards; on a 40x40
@@ -44,13 +51,19 @@ def voronoi_partition(state: GameState) -> NDArray[np.int8]:
     popleft = queue.popleft
     append = queue.append
 
-    for p in state.players:
-        if p.alive:
-            r, c = p.head
-            idx = r * w + c
-            owner_flat[idx] = p.player_id
-            dist_flat[idx] = 0
-            append((r, c, idx))
+    alive_codes = {
+        OWNED_CODES[p.player_id]: p.player_id for p in state.players if p.alive
+    }
+    for idx in range(n):
+        code = grid_flat[idx]
+        if code == EMPTY:
+            continue
+        pid = alive_codes.get(code)
+        if pid is None:
+            continue
+        owner_flat[idx] = pid
+        dist_flat[idx] = 0
+        append((idx // w, idx % w, idx))
 
     last_row = h - 1
     last_col = w - 1
@@ -112,5 +125,9 @@ def voronoi_partition(state: GameState) -> NDArray[np.int8]:
 
 
 def reachable_area(state: GameState, player_id: int) -> int:
-    """Number of cells won by ``player_id`` in the Voronoi partition."""
+    """Number of cells won by ``player_id`` in the Voronoi partition.
+
+    Includes the player's own territory (seeded at distance 0), so this is
+    "territory plus the empty cells this player would win in a race".
+    """
     return int(np.count_nonzero(voronoi_partition(state) == player_id))

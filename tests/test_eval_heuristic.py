@@ -6,54 +6,35 @@ import time
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from territory_takeover import eval as tt_eval
 from territory_takeover.actions import legal_actions
-from territory_takeover.constants import PLAYER_1_PATH, PLAYER_2_PATH
+from territory_takeover.constants import EMPTY, OWNED_CODES
 from territory_takeover.engine import new_game, step
 from territory_takeover.eval import heuristic as heuristic_mod
 from territory_takeover.eval.features import choke_pressure as shared_choke_pressure
-from territory_takeover.eval.heuristic import (
-    DEAD_SENTINEL,
-    LinearEvaluator,
-    default_evaluator,
-)
+from territory_takeover.eval.heuristic import LinearEvaluator, default_evaluator
 from territory_takeover.eval.voronoi import voronoi_partition as _real_voronoi_partition
 from territory_takeover.state import GameState, PlayerState
 
 
 def _make_state(
-    grid: np.ndarray, heads: list[tuple[int, int]]
+    grid: NDArray[np.int8], heads: list[tuple[int, int]]
 ) -> GameState:
     players = [
         PlayerState(
             player_id=i,
-            path=[h],
-            path_set={h},
             head=h,
-            claimed_count=0,
+            territory_count=int(np.count_nonzero(grid == OWNED_CODES[i])),
             alive=True,
         )
         for i, h in enumerate(heads)
     ]
-    return GameState(grid=grid, players=players)
-
-
-def _make_state_with_path(
-    grid: np.ndarray, paths: list[list[tuple[int, int]]]
-) -> GameState:
-    players = [
-        PlayerState(
-            player_id=i,
-            path=list(path),
-            path_set=set(path),
-            head=path[-1],
-            claimed_count=0,
-            alive=True,
-        )
-        for i, path in enumerate(paths)
-    ]
-    return GameState(grid=grid, players=players)
+    state = GameState(grid=grid, players=players)
+    state.alive_count = len(players)
+    state.empty_count = int(np.count_nonzero(grid == EMPTY))
+    return state
 
 
 def _build_midgame_40x40(n_plies: int = 120) -> GameState:
@@ -110,17 +91,32 @@ def test_evaluate_for_matches_evaluate_slice() -> None:
         assert float(vec[pid]) == evaluator.evaluate_for(state, pid), f"pid={pid}"
 
 
-def test_dead_player_returns_sentinel() -> None:
-    state = new_game(board_size=40)
+def test_dead_player_scored_via_features_not_sentinel() -> None:
+    # Under the corrected rules death keeps territory, so a dead player is
+    # scored with the same features as everyone else — no sentinel. Their
+    # reachable_area collapses to territory_count and choke_pressure
+    # saturates at 1.0.
+    grid = np.zeros((6, 6), dtype=np.int8)
+    for c in range(5):
+        grid[0, c] = OWNED_CODES[0]
+    grid[5, 5] = OWNED_CODES[1]
+    state = _make_state(grid, [(0, 0), (5, 5)])
     state.players[0].alive = False
-    evaluator = default_evaluator()
-    scores = evaluator.evaluate(state)
+    state.alive_count = 1
 
-    assert scores[0] == DEAD_SENTINEL
-    assert evaluator.evaluate_for(state, 0) == DEAD_SENTINEL
-    # Living players should not be affected by the sentinel.
-    for pid in range(1, 4):
-        assert scores[pid] != DEAD_SENTINEL, f"pid={pid} unexpectedly sentinel"
+    reach = LinearEvaluator({"reachable_area": 1.0}).evaluate(state)
+    assert reach[0] == 5.0, "dead player's reachable_area must equal territory_count"
+    assert reach[1] > reach[0], "living player owns the rest of the board"
+
+    choke = LinearEvaluator({"choke_pressure": 1.0}).evaluate(state)
+    assert choke[0] == 1.0
+
+    # A dead player with a big territory still outscores a small living one
+    # under a territory-weighted evaluator — death is not a catastrophe.
+    territory = LinearEvaluator({"territory_total": 1.0}).evaluate(state)
+    assert territory[0] == 5.0
+    assert territory[1] == 1.0
+    assert territory[0] > territory[1]
 
 
 def test_unknown_weight_key_raises() -> None:
@@ -128,8 +124,10 @@ def test_unknown_weight_key_raises() -> None:
         LinearEvaluator({"not_a_feature": 1.0})
 
 
-def test_zero_weights_evaluator_returns_zero_for_alive_players() -> None:
+def test_zero_weights_evaluator_returns_zero_for_all_players() -> None:
     state = new_game(board_size=40)
+    state.players[3].alive = False
+    state.alive_count = 3
     scores = LinearEvaluator({}).evaluate(state)
 
     for pid in range(4):
@@ -137,16 +135,16 @@ def test_zero_weights_evaluator_returns_zero_for_alive_players() -> None:
 
 
 def test_mobility_zero_dominated_by_mobility_four() -> None:
-    # P0 head surrounded on all four sides by P1 path tiles → mobility 0.
-    # P1 head placed at (6, 6) with four empty neighbours → mobility 4.
+    # P0 head surrounded on all four sides by P1 territory -> mobility 0.
+    # P1 head placed at (6, 6) with four empty neighbours -> mobility 4.
     # Under a mobility-only evaluator, P1's score must strictly exceed P0's.
     grid = np.zeros((10, 10), dtype=np.int8)
-    grid[3, 3] = PLAYER_1_PATH  # P0 head
-    grid[2, 3] = PLAYER_2_PATH  # wall above P0
-    grid[4, 3] = PLAYER_2_PATH  # wall below P0
-    grid[3, 2] = PLAYER_2_PATH  # wall left of P0
-    grid[3, 4] = PLAYER_2_PATH  # wall right of P0
-    grid[6, 6] = PLAYER_2_PATH  # P1 head
+    grid[3, 3] = OWNED_CODES[0]  # P0 head
+    grid[2, 3] = OWNED_CODES[1]  # wall above P0
+    grid[4, 3] = OWNED_CODES[1]  # wall below P0
+    grid[3, 2] = OWNED_CODES[1]  # wall left of P0
+    grid[3, 4] = OWNED_CODES[1]  # wall right of P0
+    grid[6, 6] = OWNED_CODES[1]  # P1 head
     state = _make_state(grid, [(3, 3), (6, 6)])
 
     evaluator = LinearEvaluator({"mobility": 1.0})
@@ -157,12 +155,30 @@ def test_mobility_zero_dominated_by_mobility_four() -> None:
     assert scores[0] < scores[1]
 
 
+def test_mobility_feature_counts_traversal_moves() -> None:
+    # P0's head has one own-cell neighbour (traversal) and two empty
+    # neighbours; the mobility feature counts all three, while
+    # claiming_mobility counts only the two claims.
+    grid = np.zeros((5, 5), dtype=np.int8)
+    grid[2, 2] = OWNED_CODES[0]
+    grid[2, 1] = OWNED_CODES[0]
+    grid[1, 2] = OWNED_CODES[1]
+    state = _make_state(grid, [(2, 2), (1, 2)])
+
+    mob = LinearEvaluator({"mobility": 1.0}).evaluate(state)
+    claim = LinearEvaluator({"claiming_mobility": 1.0}).evaluate(state)
+
+    assert mob[0] == 3.0
+    assert claim[0] == 2.0
+
+
 def test_opponent_distance_handles_solo_survivor() -> None:
     # Only P0 is alive; head_opponent_distance returns math.inf, but the
     # evaluator must substitute 0.0 so the weighted sum stays finite.
     state = new_game(board_size=40)
     for pid in range(1, 4):
         state.players[pid].alive = False
+    state.alive_count = 1
 
     evaluator = LinearEvaluator({"opponent_distance": 0.05})
     score = evaluator.evaluate_for(state, 0)
@@ -180,7 +196,7 @@ def test_voronoi_computed_once_per_evaluate() -> None:
     calls = 0
     original = _real_voronoi_partition
 
-    def counting(st: GameState) -> np.ndarray:
+    def counting(st: GameState) -> NDArray[np.int8]:
         nonlocal calls
         calls += 1
         return original(st)
@@ -202,34 +218,26 @@ def test_choke_pressure_feature_matches_shared_impl() -> None:
     scores = evaluator.evaluate(state)
 
     for pid in range(len(state.players)):
-        if not state.players[pid].alive:
-            continue
         expected = shared_choke_pressure(state, pid)
         assert scores[pid] == pytest.approx(expected, abs=1e-12), (
             f"pid={pid} evaluator={scores[pid]} shared={expected}"
         )
 
 
-def test_enclosure_potential_area_zero_when_none() -> None:
-    # Straight-line path: enclosure_potential returns None, so the feature
-    # must contribute 0.0 — not crash.
-    grid = np.zeros((5, 5), dtype=np.int8)
-    path = [(2, 0), (2, 1), (2, 2)]
-    for r, c in path:
-        grid[r, c] = PLAYER_1_PATH
-    state = _make_state_with_path(grid, [path])
+def test_default_evaluator_uses_documented_feature_set() -> None:
+    # Guard against feature-set drift between the evaluator defaults and the
+    # tuner's search space.
+    from territory_takeover.eval.tuning import FEATURE_KEYS
 
-    evaluator = LinearEvaluator({"enclosure_potential_area": 1.0})
-    scores = evaluator.evaluate(state)
-
-    assert scores[0] == 0.0
+    assert set(default_evaluator().weights) == set(FEATURE_KEYS)
 
 
 def test_evaluator_exported_from_eval_package() -> None:
     # Guard against forgetting to re-export from the subpackage __init__.
     assert tt_eval.LinearEvaluator is LinearEvaluator
     assert tt_eval.default_evaluator is default_evaluator
-    assert tt_eval.DEAD_SENTINEL == DEAD_SENTINEL
+    # The old-rules DEAD_SENTINEL constant must stay gone.
+    assert not hasattr(heuristic_mod, "DEAD_SENTINEL")
 
 
 def test_evaluate_40x40_benchmark(capsys: pytest.CaptureFixture[str]) -> None:

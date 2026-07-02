@@ -31,14 +31,10 @@ if TYPE_CHECKING:
 _RGB_PALETTE: NDArray[np.uint8] = np.array(
     [
         (30, 30, 30),     # 0 EMPTY
-        (220, 60, 60),    # 1 P1 path
-        (60, 200, 90),    # 2 P2 path
-        (70, 130, 230),   # 3 P3 path
-        (230, 210, 60),   # 4 P4 path
-        (140, 50, 50),    # 5 P1 claimed
-        (50, 130, 70),    # 6 P2 claimed
-        (60, 90, 150),    # 7 P3 claimed
-        (150, 140, 50),   # 8 P4 claimed
+        (220, 60, 60),    # 1 P1 owned
+        (60, 200, 90),    # 2 P2 owned
+        (70, 130, 230),   # 3 P3 owned
+        (230, 210, 60),   # 4 P4 owned
     ],
     dtype=np.uint8,
 )
@@ -59,7 +55,7 @@ def _make_observation_space(board_size: int, num_players: int) -> spaces.Dict:
     return spaces.Dict(
         {
             "grid": spaces.Box(
-                low=0, high=8, shape=(board_size, board_size), dtype=np.int8
+                low=0, high=4, shape=(board_size, board_size), dtype=np.int8
             ),
             "current_player": spaces.Discrete(num_players),
             "heads": spaces.Box(

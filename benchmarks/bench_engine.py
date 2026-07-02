@@ -26,7 +26,7 @@ import numpy as np
 
 from territory_takeover import GameState, new_game, simulate_random_rollout, step
 from territory_takeover.actions import legal_actions
-from territory_takeover.constants import DIRECTIONS, PATH_CODES
+from territory_takeover.constants import DIRECTIONS, OWNED_CODES
 
 BENCH_DIR = Path(__file__).resolve().parent
 
@@ -129,12 +129,12 @@ def _play_random_game(state: GameState, rng: random.Random) -> int:
 
 
 def _make_enclosure_ready_state() -> tuple[GameState, int]:
-    """Build a small state where player 0's next East move closes a loop.
+    """Build a small state where player 0's next East move claims a new cell.
 
-    Path winds around to end at head (2, 4). The East neighbor (2, 5) is empty
-    and legal; after placing, (2, 5)'s E-neighbor (2, 6) is a same-player path
-    tile that is NOT the predecessor — the enclosure trigger fires.
-    Returns (state, closing_action).
+    Under the corrected rules there is no enclosure mechanic; this fixture
+    (name kept for report continuity) times a claiming step taken from a
+    non-trivial mid-game snake so the liveness bookkeeping in _advance_turn
+    is exercised on a realistic territory shape. Returns (state, action).
     """
     state = new_game(board_size=10, num_players=2, seed=0)
     state.grid.fill(0)
@@ -145,27 +145,26 @@ def _make_enclosure_ready_state() -> tuple[GameState, int]:
         (3, 2), (2, 2), (2, 3), (2, 4),
     ]
     p0 = state.players[0]
-    p0.path = list(connected)
-    p0.path_set = set(connected)
     p0.head = connected[-1]
-    p0.claimed_count = 0
+    p0.territory_count = len(connected)
     p0.alive = True
+    p0.alive_witness = None
     for r, c in connected:
-        state.grid[r, c] = PATH_CODES[0]
+        state.grid[r, c] = OWNED_CODES[0]
 
     # Move player 1 out of the way so they don't occupy default spawn cells.
     p1 = state.players[1]
-    p1.path = [(9, 9)]
-    p1.path_set = {(9, 9)}
     p1.head = (9, 9)
-    p1.claimed_count = 0
+    p1.territory_count = 1
     p1.alive = True
-    state.grid[9, 9] = PATH_CODES[1]
+    p1.alive_witness = None
+    state.grid[9, 9] = OWNED_CODES[1]
 
     state.current_player = 0
     state.turn_number = 0
     state.done = False
     state.winner = None
+    state.empty_count = int((state.grid == 0).sum())
 
     return state, 3  # East
 
@@ -268,7 +267,7 @@ def bench_step_with_enclosure(iters: int) -> TimingResult:
 
     if claimed_seen == 0:
         raise RuntimeError(
-            "bench_step_with_enclosure: no iteration actually enclosed — "
+            "bench_step_with_enclosure: no iteration actually claimed — "
             "_make_enclosure_ready_state is broken."
         )
 
@@ -439,16 +438,17 @@ def bench_trigger_fire_rate(
 ) -> TimingResult:
     """Diagnostic: measure how often the enclosure trigger fires vs actually claims.
 
-    The current engine runs a full-board boundary BFS every time the cheap
-    trigger predicate fires (placed_cell adjacent to a same-player path tile
-    other than its predecessor). On random play the trigger over-approximates
-    — many fires produce 0 claimed cells — which is the core wasted-work
-    hypothesis the optimization plan addresses.
+    Under the corrected rules the per-turn cost analogue is the liveness
+    check in ``_advance_turn`` (witness-cached BFS). This diagnostic counts
+    how often a claiming move was available vs a traversal move taken, and
+    how many turns the game ran — a coarse picture of where step() time goes
+    under random play.
 
     Reported via ``extra``:
-      - trigger_fires: total fires summed across games
-      - enclosures:    fires that claimed >= 1 cell
-      - wasted_fires:  fires that claimed 0 cells (full BFS for nothing)
+      - trigger_fires: turns where a claiming move was available (kept name
+        for report continuity)
+      - enclosures:    steps that actually claimed a cell
+      - wasted_fires:  claim-available turns that claimed nothing
       - wasted_rate:   wasted_fires / trigger_fires
       - steps:         total step() calls
     """
@@ -465,30 +465,22 @@ def bench_trigger_fire_rate(
             pid = state.current_player
             acts = legal_actions(state, pid)
             if not acts:
-                step(state, 0)  # advances/marks dead
+                step(state, 0)  # wasted turn; liveness check advances
                 steps_total += 1
                 continue
 
-            # Replicate the trigger-fire check around the step call so we can
-            # attribute before/after. This is diagnostic only; overhead is fine.
+            # Diagnostic: was a claiming move available this turn?
+            grid = state.grid
+            h, w = grid.shape
             r, c = state.players[pid].head
-            chosen = rng.choice(acts)
-            dr, dc = DIRECTIONS[chosen]
-            target = (r + dr, c + dc)
-            # Would-be predecessor is the current head, not the placed target.
-            predecessor = (r, c)
             fires = False
-            p = state.players[pid]
-            pset = p.path_set
-            tr, tc = target
             for ddr, ddc in DIRECTIONS:
-                nbr = (tr + ddr, tc + ddc)
-                if nbr == predecessor:
-                    continue
-                if nbr in pset:
+                nr, nc = r + ddr, c + ddc
+                if 0 <= nr < h and 0 <= nc < w and grid.item(nr, nc) == 0:
                     fires = True
                     break
 
+            chosen = rng.choice(acts)
             result = step(state, chosen)
             steps_total += 1
             if fires:
@@ -686,7 +678,7 @@ def _write_hotspots(stats: pstats.Stats, dest: Path, games: int) -> None:
 
 
 def _candidacy_note(fn: str) -> str:
-    if "detect_and_apply_enclosure" in fn:
+    if "has_reachable_empty" in fn:
         return (
             "**Strong C/Cython candidate.** The BFS boundary flood over an "
             "`np.bool_` mask is allocation-heavy (fresh mask + deque per "
@@ -697,7 +689,7 @@ def _candidacy_note(fn: str) -> str:
     if fn == "step":
         return (
             "**Moderate candidate.** `step` itself is glue — its tottime is "
-            "mostly attribute lookups (`state.players[...].path.append`) and "
+            "mostly attribute lookups and "
             "dict construction for `info`. A Cython cdef class for GameState "
             "would collapse the attribute chain; worth doing once the core "
             "primitives are ported."

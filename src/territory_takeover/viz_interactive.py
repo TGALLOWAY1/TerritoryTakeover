@@ -1,15 +1,16 @@
 """Interactive HTTP server for the Territory Takeover *Arena* front end.
 
 Serves a polished, mobile-first single-page UI (no external assets) that drives
-the real :mod:`territory_takeover.engine` enclosure game. Visitors watch up to
+the real :mod:`territory_takeover.engine` territory game. Visitors watch up to
 four agents battle for territory, swap any agent's strategy from a dropdown, and
 drive the simulation with play / pause / step / speed / reset controls. Seat 0
-can optionally be handed to a human (arrow keys / WASD) for Tron-style play.
+can optionally be handed to a human (arrow keys / WASD).
 
-The territory model is the engine's own: a cell is *owned* by a player the moment
-that player visits it (its path) and stays owned for the rest of the game, plus
-any cells the player encloses. A player's territory is therefore
-``len(path) + claimed_count`` — exactly the engine's scoring.
+The territory model is the engine's own: a cell is *owned* by a player the
+moment that player visits it and stays owned for the rest of the game. A
+player's territory is ``territory_count`` — exactly the engine's scoring.
+Players may traverse their own territory freely; a player dies when no EMPTY
+cell is reachable through their own cells (walled out or board full).
 
 Endpoints (all served from one process, no build tooling):
 
@@ -1099,14 +1100,15 @@ function legalCount(f, seat){
   for (var d = 0; d < 4; d++){
     var rr = h[0]+D[d][0], cc = h[1]+D[d][1];
     if (rr<0||rr>=H||cc<0||cc>=W) continue;
-    if (f.grid[rr*W+cc] === 0) n++;
+    var v = f.grid[rr*W+cc];
+    if (v === 0 || v === seat + 1) n++;
   }
   return n;
 }
 function updateStats(f){
   var owned = [], total = 0;
   for (var s = 0; s < NUM_PLAYERS; s++){
-    owned[s] = f.path_len[s] + f.claimed[s];
+    owned[s] = f.territory[s];
     total += owned[s];
   }
   for (s = 0; s < NUM_PLAYERS; s++){

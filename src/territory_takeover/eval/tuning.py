@@ -40,7 +40,7 @@ FEATURE_KEYS: tuple[str, ...] = (
     "territory_total",
     "reachable_area",
     "mobility",
-    "enclosure_potential_area",
+    "claiming_mobility",
     "choke_pressure",
     "opponent_distance",
 )

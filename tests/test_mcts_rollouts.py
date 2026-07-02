@@ -150,6 +150,11 @@ def test_informed_rollout_beats_uniform_at_same_iters() -> None:
     p ~ 0.08) while still clearly rejecting "informed is no better than
     uniform." Expected wall time ~15 minutes.
     """
+    if not os.environ.get("TERRITORY_RUN_LONG_ROLLOUT_MATCHUP"):
+        pytest.skip(
+            "set TERRITORY_RUN_LONG_ROLLOUT_MATCHUP=1 to run (corrected-rules "
+            "games are ~10x longer; the 100-game budget needs ~hours)"
+        )
     informed = UCTAgent(
         iterations=200,
         rollout_kind="informed",

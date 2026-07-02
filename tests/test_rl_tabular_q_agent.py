@@ -78,28 +78,24 @@ def test_qagent_epsilon_one_draws_uniform() -> None:
     # setting greedy=False and eps_start=eps_end=1. Count draws per legal
     # action and assert each falls inside a Wilson 99% band of 1/|legal|.
     grid = np.zeros((8, 8), dtype=np.int8)
-    from territory_takeover.constants import PATH_CODES
+    from territory_takeover.constants import OWNED_CODES
     from territory_takeover.state import GameState, PlayerState
 
-    grid[4, 4] = PATH_CODES[0]
-    grid[0, 0] = PATH_CODES[1]
+    grid[4, 4] = OWNED_CODES[0]
+    grid[0, 0] = OWNED_CODES[1]
     state = GameState(
         grid=grid,
         players=[
             PlayerState(
                 player_id=0,
-                path=[(4, 4)],
-                path_set={(4, 4)},
                 head=(4, 4),
-                claimed_count=0,
+                territory_count=1,
                 alive=True,
             ),
             PlayerState(
                 player_id=1,
-                path=[(0, 0)],
-                path_set={(0, 0)},
                 head=(0, 0),
-                claimed_count=0,
+                territory_count=1,
                 alive=True,
             ),
         ],

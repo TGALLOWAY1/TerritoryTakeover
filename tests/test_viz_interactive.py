@@ -161,10 +161,10 @@ def test_match_advances_and_finishes() -> None:
         turns = [f["turn"] for f in frames]
         assert turns == sorted(turns)
 
-        # Territory (path + claimed cells) must grow as agents move.
+        # Total territory (spawn + claimed cells) must grow as agents move.
         first, last = frames[0], frames[-1]
-        owned0 = sum(first["path_len"]) + sum(first["claimed"])
-        owned1 = sum(last["path_len"]) + sum(last["claimed"])
+        owned0 = sum(first["territory"])
+        owned1 = sum(last["territory"])
         assert owned1 > owned0
 
         def is_done() -> bool:
@@ -174,8 +174,10 @@ def test_match_advances_and_finishes() -> None:
         assert _wait_until(is_done), "game never reached a terminal state"
         final = _full_state(base)["frames"][-1]
         assert "winner" in final
-        # On 2 players, exactly one should remain alive at game end.
-        assert sum(1 for a in final["alive"] if a) <= 1
+        # The game ends only when every player is dead (no reachable EMPTY).
+        assert sum(1 for a in final["alive"] if a) == 0
+        # Death keeps territory: every seat retains at least its spawn cell.
+        assert all(t >= 1 for t in final["territory"])
 
 
 # ---------------------------------------------------------------------------

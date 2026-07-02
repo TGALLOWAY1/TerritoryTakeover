@@ -19,16 +19,13 @@ from territory_takeover.search.agent import Agent
 # One-ply greedy weights.
 #
 # The shipped default_evaluator() is documented as "starter weights ... will be
-# tuned against self-play later" (eval/heuristic.py: default_evaluator). Those
-# weights include choke_pressure, reachable_area, and opponent_distance, which
-# are noisy at one-ply depth and produce worse-than-random play in this
-# tournament. A compact three-feature set (territory, mobility, enclosure
-# potential) is both more interpretable and empirically dominant: across seeds
-# 0..9 on the 20x20 / 50-game benchmark it wins 70-86%.
+# tuned against self-play later" (eval/heuristic.py: default_evaluator). A
+# compact three-feature set (territory, claiming mobility, mobility) is more
+# interpretable at one-ply depth and keeps the tournament tests fast.
 _GREEDY_TEST_WEIGHTS: dict[str, float] = {
     "territory_total": 1.0,
+    "claiming_mobility": 0.5,
     "mobility": 0.3,
-    "enclosure_potential_area": 0.5,
 }
 
 
